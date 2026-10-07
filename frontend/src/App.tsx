@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pager } from "./components/Pager";
 import { Toast } from "./components/Toast";
-import { api, auth, Chat, FriendLists, live, User } from "./lib/api";
+import { api, Chat, FriendLists, live, User } from "./lib/api";
 import { applyAccent, buzz, pref } from "./lib/feel";
 import { Camera, Capture } from "./screens/Camera";
 import { Chats } from "./screens/Chats";
 import { Friends } from "./screens/Friends";
-import { Onboard } from "./screens/Onboard";
+import { PickName, Welcome } from "./screens/Onboard";
 import { Preview } from "./screens/Preview";
 import { Settings } from "./screens/Settings";
 import { Viewer } from "./screens/Viewer";
@@ -17,14 +17,13 @@ const FRIENDS = 2;
 
 export default function App() {
   const [me, setMe] = useState<User | null>(null);
-  const [booting, setBooting] = useState(!!auth.token);
+  const [booting, setBooting] = useState(true);
 
   useEffect(() => {
-    if (!auth.token) return;
     api
       .me()
       .then(setMe)
-      .catch(() => auth.set(null))
+      .catch(() => setMe(null))
       .finally(() => setBooting(false));
   }, []);
 
@@ -33,11 +32,12 @@ export default function App() {
   }, [me]);
 
   if (booting) return <div className="h-full bg-black" />;
-  if (!me) return <Onboard onIn={(u) => setMe(u)} />;
-  return <Home me={me} setMe={setMe} />;
+  if (!me) return <Welcome onIn={setMe} />;
+  if (!me.username) return <PickName onDone={setMe} />;
+  return <Home me={me as User & { username: string }} setMe={setMe} />;
 }
 
-function Home({ me, setMe }: { me: User; setMe: (u: User | null) => void }) {
+function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User | null) => void }) {
   const [page, setPage] = useState(CAMERA);
   const [chats, setChats] = useState<Chat[]>([]);
   const [lists, setLists] = useState<FriendLists>({ friends: [], incoming: [], outgoing: [] });
@@ -73,10 +73,10 @@ function Home({ me, setMe }: { me: User; setMe: (u: User | null) => void }) {
     setPage(CAMERA);
   };
 
-  const send = async (to: string[], secs: number, caption: string) => {
+  const send = async (file: Blob, overlay: Blob | null, to: string[], secs: number) => {
     if (!capture) return;
     try {
-      const r = await api.send(capture.blob, to, capture.kind === "video" ? 0 : secs, caption);
+      const r = await api.send(file, overlay, to, capture.kind === "video" ? 0 : secs);
       buzz([8, 40, 16]);
       setToast(`sent to ${r.sent_to.map((n) => "@" + n).join(", ")}`);
       URL.revokeObjectURL(capture.url);
@@ -160,11 +160,9 @@ function Home({ me, setMe }: { me: User; setMe: (u: User | null) => void }) {
           pref.set("seconds", String(s));
         }}
         onLogout={() => {
-          api.logout().finally(() => {
-            auth.set(null);
-            setMe(null);
-          });
+          api.logout().finally(() => setMe(null));
         }}
+        toast={setToast}
       />
 
       <Toast text={toast} onDone={() => setToast(null)} />

@@ -1,8 +1,11 @@
-import { Check, LogOut } from "lucide-react";
+import { Check, Fingerprint, LogOut, QrCode, Smartphone, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
+import { Scanner } from "../components/Scanner";
 import { Sheet } from "../components/Sheet";
-import { User } from "../lib/api";
-import { ACCENTS, buzz, onColor, timerLabel, TIMERS } from "../lib/feel";
+import { api, Device, User } from "../lib/api";
+import { ACCENTS, ago, buzz, onColor, timerLabel, TIMERS } from "../lib/feel";
+import { addPasskey, passkeysSupported } from "../lib/passkey";
 
 export function Settings({
   open,
@@ -12,66 +15,160 @@ export function Settings({
   onColor: setColor,
   onSeconds,
   onLogout,
+  toast,
 }: {
   open: boolean;
-  me: User;
+  me: User & { username: string };
   seconds: number;
   onClose: () => void;
   onColor: (c: string) => void;
   onSeconds: (s: number) => void;
   onLogout: () => void;
+  toast: (t: string) => void;
 }) {
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [passkeys, setPasskeys] = useState(0);
+  const [scanning, setScanning] = useState(false);
+
+  const load = () =>
+    api
+      .devices()
+      .then((d) => {
+        setDevices(d.devices);
+        setPasskeys(d.passkeys);
+      })
+      .catch(() => {});
+
+  useEffect(() => {
+    if (open) load();
+  }, [open]);
+
+  const passkey = async () => {
+    try {
+      await addPasskey();
+      buzz([10, 50, 20]);
+      toast("passkey added 🔑");
+      load();
+    } catch (e) {
+      if ((e as Error).name !== "NotAllowedError") toast((e as Error).message);
+    }
+  };
+
+  const approve = async (code: string) => {
+    setScanning(false);
+    try {
+      await api.linkApprove(code.replace(/^kicksnap-link:/i, ""));
+      buzz([10, 50, 20]);
+      toast("device added ✨");
+      setTimeout(load, 2500);
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  };
+
   return (
-    <Sheet open={open} onClose={onClose}>
-      <div className="px-6 pb-[max(env(safe-area-inset-bottom),24px)]">
-        <div className="flex flex-col items-center gap-3 pt-2">
-          <Avatar name={me.username} color={me.color} size={88} />
-          <p className="text-2xl font-black">@{me.username}</p>
-        </div>
+    <>
+      <Sheet open={open} onClose={onClose}>
+        <div className="max-h-[80vh] overflow-y-auto px-6 pb-[max(env(safe-area-inset-bottom),24px)]">
+          <div className="flex flex-col items-center gap-3 pt-2">
+            <Avatar name={me.username} color={me.color} size={96} />
+            <p className="text-3xl font-black">@{me.username}</p>
+          </div>
 
-        <p className="mb-3 mt-8 text-sm font-bold uppercase tracking-wider text-white/40">your colour</p>
-        <div className="flex flex-wrap gap-3">
-          {ACCENTS.map((c) => (
-            <button
-              key={c}
-              onClick={() => {
-                buzz(6);
-                setColor(c);
-              }}
-              className="grid h-11 w-11 place-items-center rounded-full transition active:scale-90"
-              style={{ background: c, color: onColor(c) }}
-              aria-label={c}
-            >
-              {c.toLowerCase() === me.color.toLowerCase() && <Check size={22} strokeWidth={3.5} />}
-            </button>
+          <div className="mt-6 grid grid-cols-2 gap-3">
+            <Tile onClick={() => setScanning(true)} icon={<QrCode size={30} strokeWidth={2.5} />}>
+              add a device
+            </Tile>
+            {passkeysSupported() && (
+              <Tile onClick={passkey} icon={<Fingerprint size={30} strokeWidth={2.5} />}>
+                {passkeys ? `passkeys · ${passkeys}` : "add a passkey"}
+              </Tile>
+            )}
+          </div>
+
+          <Label>your colour</Label>
+          <div className="flex flex-wrap gap-3">
+            {ACCENTS.map((c) => (
+              <button
+                key={c}
+                onClick={() => {
+                  buzz(6);
+                  setColor(c);
+                }}
+                className="grid h-12 w-12 place-items-center rounded-full transition ease-spring active:scale-90"
+                style={{ background: c, color: onColor(c) }}
+                aria-label={c}
+              >
+                {c.toLowerCase() === me.color.toLowerCase() && <Check size={24} strokeWidth={3.5} />}
+              </button>
+            ))}
+          </div>
+
+          <Label>photos show for</Label>
+          <div className="flex gap-2">
+            {TIMERS.map((t) => (
+              <button
+                key={t}
+                onClick={() => {
+                  buzz(5);
+                  onSeconds(t);
+                }}
+                className={`flex-1 rounded-full py-4 text-xl font-black transition ease-spring active:scale-95 ${t === seconds ? "bg-accent text-black" : "bg-white/10"}`}
+              >
+                {timerLabel(t)}
+              </button>
+            ))}
+          </div>
+
+          <Label>signed in on</Label>
+          {devices.map((d) => (
+            <div key={d.id} className="flex items-center gap-3 py-2">
+              <div className="grid h-11 w-11 place-items-center rounded-full bg-white/10">
+                <Smartphone size={22} />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold">
+                  {d.label} {d.this && <span className="text-accent">· this one</span>}
+                </p>
+                <p className="text-sm text-white/40">active {ago(d.seen_at) || "now"}</p>
+              </div>
+              {!d.this && (
+                <button
+                  onClick={() => api.removeDevice(d.id).then(load)}
+                  className="grid h-11 w-11 place-items-center rounded-full bg-white/5 text-white/60 active:scale-90"
+                  aria-label="sign out that device"
+                >
+                  <X size={20} />
+                </button>
+              )}
+            </div>
           ))}
-        </div>
 
-        <p className="mb-3 mt-8 text-sm font-bold uppercase tracking-wider text-white/40">photos show for</p>
-        <div className="flex gap-2">
-          {TIMERS.map((t) => (
-            <button
-              key={t}
-              onClick={() => {
-                buzz(5);
-                onSeconds(t);
-              }}
-              className={`flex-1 rounded-full py-3 text-lg font-bold transition active:scale-95 ${
-                t === seconds ? "bg-accent text-black" : "bg-white/10"
-              }`}
-            >
-              {timerLabel(t)}
-            </button>
-          ))}
+          <button
+            onClick={onLogout}
+            className="mt-8 flex w-full items-center justify-center gap-2 rounded-full bg-white/5 py-5 text-lg font-bold text-white/60 active:scale-[.98]"
+          >
+            <LogOut size={22} /> sign out here
+          </button>
         </div>
+      </Sheet>
+      {scanning && <Scanner hint="scan the code on the new device" onClose={() => setScanning(false)} onCode={approve} />}
+    </>
+  );
+}
 
-        <button
-          onClick={onLogout}
-          className="mt-10 flex w-full items-center justify-center gap-2 rounded-full bg-white/5 py-4 font-bold text-white/60 active:scale-[.98]"
-        >
-          <LogOut size={20} /> sign out
-        </button>
-      </div>
-    </Sheet>
+function Label({ children }: { children: React.ReactNode }) {
+  return <p className="mb-3 mt-8 text-sm font-black uppercase tracking-wider text-white/40">{children}</p>;
+}
+
+function Tile({ children, icon, onClick }: { children: React.ReactNode; icon: React.ReactNode; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex flex-col items-start gap-3 rounded-[1.75rem] bg-white/10 p-5 text-left text-lg font-black leading-tight transition ease-spring active:scale-95 active:bg-white/15"
+    >
+      <span className="text-accent">{icon}</span>
+      {children}
+    </button>
   );
 }

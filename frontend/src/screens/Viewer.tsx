@@ -7,6 +7,7 @@ import { ago, buzz } from "../lib/feel";
 export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string) => void }) {
   const [i, setI] = useState(0);
   const [url, setUrl] = useState<string | null>(null);
+  const [overlay, setOverlay] = useState<string | null>(null);
   const [dy, setDy] = useState(0);
   const y0 = useRef<number | null>(null);
   const snap = chat.snaps[i];
@@ -20,20 +21,22 @@ export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string
   useEffect(() => {
     if (!snap) return onDone();
     let gone = false;
-    let objectUrl: string | null = null;
+    const urls: string[] = [];
     setUrl(null);
-    api
-      .media(snap.id)
-      .then((blob) => {
+    setOverlay(null);
+    Promise.all([api.media(snap.id), snap.has_overlay ? api.overlay(snap.id).catch(() => null) : null])
+      .then(([blob, layer]) => {
         if (gone) return;
-        objectUrl = URL.createObjectURL(blob);
-        setUrl(objectUrl);
+        urls.push(URL.createObjectURL(blob));
+        if (layer) urls.push(URL.createObjectURL(layer));
+        setOverlay(layer ? urls[1] : null);
+        setUrl(urls[0]);
         api.open(snap.id).catch(() => {});
       })
       .catch(() => !gone && next());
     return () => {
       gone = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      urls.forEach(URL.revokeObjectURL);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap?.id]);
@@ -69,9 +72,7 @@ export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string
         <video src={url} autoPlay playsInline className="absolute inset-0 h-full w-full object-cover" onEnded={next} />
       )}
 
-      {snap.caption && (
-        <div className="absolute inset-x-0 top-[62%] bg-black/55 px-4 py-2.5 text-center text-xl font-semibold backdrop-blur-sm">{snap.caption}</div>
-      )}
+      {url && overlay && <img src={overlay} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-cover" />}
 
       <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/50 to-transparent px-3 pb-8 pt-[max(env(safe-area-inset-top),10px)]">
         <div className="flex gap-1">
@@ -103,7 +104,7 @@ export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string
             e.stopPropagation();
             onDone(chat.username);
           }}
-          className="rounded-full bg-white/15 px-6 py-3 font-bold backdrop-blur active:scale-95"
+          className="rounded-full bg-accent px-8 py-4 text-xl font-black text-black shadow-[0_6px_0_rgba(0,0,0,.35)] transition ease-spring active:translate-y-1 active:scale-95 active:shadow-none"
         >
           snap back
         </button>

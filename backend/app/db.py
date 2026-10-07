@@ -10,14 +10,24 @@ DB_PATH = DATA_DIR / "kicksnap.db"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id          INTEGER PRIMARY KEY,
-    username    TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    pin_hash    TEXT NOT NULL,
+    username    TEXT UNIQUE COLLATE NOCASE,   -- NULL until picked right after sign-up
     color       TEXT NOT NULL DEFAULT '#C6FF3D',
     created_at  INTEGER NOT NULL
 );
-CREATE TABLE IF NOT EXISTS sessions (
-    token       TEXT PRIMARY KEY,
+-- every browser/phone is a device; its secret lives in an httpOnly cookie
+CREATE TABLE IF NOT EXISTS devices (
+    id          INTEGER PRIMARY KEY,
     user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash  TEXT NOT NULL UNIQUE,
+    label       TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL,
+    seen_at     INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS passkeys (
+    id          TEXT PRIMARY KEY,           -- base64url credential id
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    public_key  BLOB NOT NULL,
+    sign_count  INTEGER NOT NULL DEFAULT 0,
     created_at  INTEGER NOT NULL
 );
 -- one row per direction; accepted friendships have both rows
@@ -33,7 +43,7 @@ CREATE TABLE IF NOT EXISTS snaps (
     kind        TEXT NOT NULL,          -- photo | video
     mime        TEXT NOT NULL,
     seconds     INTEGER NOT NULL,       -- view time, 0 = loop until closed
-    caption     TEXT NOT NULL DEFAULT '',
+    has_overlay INTEGER NOT NULL DEFAULT 0, -- drawing/text layer on top of a video
     created_at  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS deliveries (

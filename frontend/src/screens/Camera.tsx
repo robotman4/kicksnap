@@ -1,7 +1,7 @@
 import { Images, MessageCircle, RefreshCcw, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
-import { User } from "../lib/api";
+import { Friend } from "../lib/api";
 import { buzz, pref } from "../lib/feel";
 
 export type Capture = { blob: Blob; kind: "photo" | "video"; url: string; mirrored: boolean };
@@ -23,7 +23,7 @@ export function Camera({
   onFriends,
   onSettings,
 }: {
-  me: User;
+  me: Friend;
   active: boolean;
   unread: number;
   onCapture: (c: Capture) => void;
@@ -191,14 +191,14 @@ export function Camera({
       {/* top bar */}
       <div className="absolute inset-x-0 top-0 flex items-start justify-between bg-gradient-to-b from-black/40 to-transparent px-4 pb-10 pt-[max(env(safe-area-inset-top),14px)]">
         <button onClick={onSettings} className="transition active:scale-90" aria-label="you">
-          <Avatar name={me.username} color={me.color} size={42} />
+          <Avatar name={me.username} color={me.color} size={52} />
         </button>
         <div className="flex flex-col gap-3">
           <IconButton label="flip camera" onClick={flip}>
-            <RefreshCcw size={24} />
+            <RefreshCcw size={26} strokeWidth={2.5} />
           </IconButton>
-          <label className="grid h-11 w-11 cursor-pointer place-items-center rounded-full bg-black/30 text-white backdrop-blur active:scale-90" aria-label="gallery">
-            <Images size={24} />
+          <label className="grid h-14 w-14 cursor-pointer place-items-center rounded-full bg-black/30 text-white backdrop-blur active:scale-90" aria-label="gallery">
+            <Images size={26} strokeWidth={2.5} />
             <input type="file" accept="image/*,video/*" className="hidden" onChange={pickFile} />
           </label>
         </div>
@@ -207,9 +207,9 @@ export function Camera({
       {/* bottom bar */}
       <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/40 to-transparent px-8 pb-[max(env(safe-area-inset-bottom),20px)] pt-16">
         <IconButton label="chats" onClick={onChats} big>
-          <MessageCircle size={28} />
+          <MessageCircle size={32} strokeWidth={2.5} />
           {unread > 0 && (
-            <span className="absolute -right-1 -top-1 grid h-6 min-w-6 place-items-center rounded-full bg-accent px-1.5 text-xs font-black text-black">
+            <span className="absolute -right-1 -top-1 grid h-7 min-w-7 animate-bounce place-items-center rounded-full bg-accent px-1.5 text-xs font-black text-black">
               {unread}
             </span>
           )}
@@ -222,11 +222,12 @@ export function Camera({
           onPointerUp={shutterUp}
           onPointerCancel={shutterUp}
           onContextMenu={(e) => e.preventDefault()}
-          className={`relative grid h-[88px] w-[88px] touch-none select-none place-items-center rounded-full transition-transform duration-300 ease-spring ${
+          className={`relative grid h-[100px] w-[100px] touch-none select-none place-items-center rounded-full transition-transform duration-300 ease-spring ${
             recording ? "scale-125" : "active:scale-90"
           }`}
         >
           <svg className="absolute inset-0 -rotate-90" viewBox="0 0 88 88">
+            <circle cx="44" cy="44" r="34" className="fill-white/15" />
             <circle cx="44" cy="44" r="40" fill="none" stroke="white" strokeWidth="6" />
             {recording && (
               <circle
@@ -246,7 +247,7 @@ export function Camera({
         </button>
 
         <IconButton label="friends" onClick={onFriends} big>
-          <Users size={28} />
+          <Users size={32} strokeWidth={2.5} />
         </IconButton>
       </div>
     </div>
@@ -259,7 +260,7 @@ function IconButton({ children, label, onClick, big }: { children: React.ReactNo
       onClick={onClick}
       aria-label={label}
       className={`relative grid place-items-center rounded-full bg-black/30 text-white backdrop-blur transition active:scale-90 ${
-        big ? "h-14 w-14" : "h-11 w-11"
+        big ? "h-16 w-16" : "h-14 w-14"
       }`}
     >
       {children}

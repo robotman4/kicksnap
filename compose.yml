@@ -6,6 +6,7 @@ services:
     environment:
       SNAP_TTL_HOURS: ${SNAP_TTL_HOURS:-24}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
+      RP_ID: ${RP_ID:-}
     volumes:
       - kicksnap-data:/data
     ports:

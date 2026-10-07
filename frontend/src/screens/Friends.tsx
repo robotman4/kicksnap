@@ -1,15 +1,10 @@
-import { Plus, ScanLine, X } from "lucide-react";
+import { Plus, ScanLine } from "lucide-react";
 import QRCode from "qrcode";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { Scanner } from "../components/Scanner";
 import { Avatar } from "../components/Avatar";
 import { api, FriendLists, User } from "../lib/api";
 import { buzz } from "../lib/feel";
-
-declare global {
-  // Chrome/Android ships this; Safari doesn't yet, so scanning hides itself there.
-  // eslint-disable-next-line no-var
-  var BarcodeDetector: { new (o: { formats: string[] }): { detect(src: CanvasImageSource): Promise<{ rawValue: string }[]> } } | undefined;
-}
 
 export function Friends({
   me,
@@ -87,11 +82,9 @@ export function Friends({
               <Plus size={26} strokeWidth={3} />
             </button>
           ) : (
-            globalThis.BarcodeDetector && (
-              <button type="button" onClick={() => setScanning(true)} className="grid h-14 w-14 place-items-center rounded-full bg-white/10 active:scale-90" aria-label="scan code">
-                <ScanLine size={24} />
-              </button>
-            )
+            <button type="button" onClick={() => setScanning(true)} className="grid h-14 w-14 place-items-center rounded-full bg-white/10 active:scale-90" aria-label="scan code">
+              <ScanLine size={24} />
+            </button>
           )}
         </form>
 
@@ -130,10 +123,16 @@ export function Friends({
 
       {scanning && (
         <Scanner
+          hint="point at a friend's code"
           onClose={() => setScanning(false)}
           onCode={(code) => {
             setScanning(false);
-            add(code);
+            if (/^kicksnap-link:/i.test(code)) {
+              api.linkApprove(code.replace(/^kicksnap-link:/i, "")).then(
+                () => toast("device added ✨"),
+                (e) => toast(e.message)
+              );
+            } else add(code);
           }}
         />
       )}
@@ -156,47 +155,6 @@ function Row({ name, color, onClick, children }: { name: string; color: string; 
       <Avatar name={name} color={color} size={46} />
       <p className="flex-1 truncate text-lg font-bold">{name}</p>
       {children}
-    </div>
-  );
-}
-
-function Scanner({ onClose, onCode }: { onClose: () => void; onCode: (c: string) => void }) {
-  const video = useRef<HTMLVideoElement>(null);
-  const cb = useRef({ onClose, onCode });
-  cb.current = { onClose, onCode };
-  useEffect(() => {
-    let stream: MediaStream | null = null;
-    let raf = 0;
-    const detector = new globalThis.BarcodeDetector!({ formats: ["qr_code"] });
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then((s) => {
-      stream = s;
-      if (!video.current) return;
-      video.current.srcObject = s;
-      const tick = async () => {
-        if (video.current?.readyState === 4) {
-          const [hit] = await detector.detect(video.current).catch(() => []);
-          if (hit?.rawValue.startsWith("kicksnap:")) return cb.current.onCode(hit.rawValue);
-        }
-        raf = requestAnimationFrame(tick);
-      };
-      tick();
-    }, () => cb.current.onClose());
-    return () => {
-      cancelAnimationFrame(raf);
-      stream?.getTracks().forEach((t) => t.stop());
-    };
-  }, []);
-
-  return (
-    <div className="fixed inset-0 z-40 bg-black" data-nodrag>
-      <video ref={video} autoPlay playsInline muted className="h-full w-full object-cover" />
-      <div className="pointer-events-none absolute inset-0 grid place-items-center">
-        <div className="h-64 w-64 rounded-[2.5rem] border-4 border-accent shadow-[0_0_0_100vmax_rgba(0,0,0,.55)]" />
-      </div>
-      <button onClick={onClose} className="absolute left-4 top-[max(env(safe-area-inset-top),14px)] grid h-12 w-12 place-items-center rounded-full bg-black/40 text-white" aria-label="close">
-        <X size={28} />
-      </button>
-      <p className="absolute inset-x-0 bottom-[max(env(safe-area-inset-bottom),40px)] text-center text-lg font-bold text-white">point at a kicksnap code</p>
     </div>
   );
 }
