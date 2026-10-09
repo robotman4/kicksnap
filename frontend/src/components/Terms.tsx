@@ -1,0 +1,90 @@
+import { Info, X } from "lucide-react";
+import { useState } from "react";
+import { createPortal } from "react-dom";
+
+/** The small (i) that opens the boring page. */
+export function TermsLink({ className = "" }: { className?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)} aria-label="terms and privacy" className={`grid h-10 w-10 place-items-center rounded-full text-white/35 active:scale-90 ${className}`}>
+        <Info size={22} />
+      </button>
+      {open && <Terms onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+const SECTIONS: [string, string[]][] = [
+  [
+    "The short version",
+    [
+      "kicksnap is a small app run by whoever runs this server. You use it as it is, at your own risk.",
+      "You are responsible for what you send. We are not responsible for what anyone sends, or for what the people you send to do with it.",
+    ],
+  ],
+  [
+    "Once you send it, it's out of your hands",
+    [
+      "Snaps disappear in the app, but the person you send to can still screenshot, screen record or film their screen with another phone. We can't stop that and we can't get it back for you.",
+      "Only send things you're OK with the other person keeping.",
+    ],
+  ],
+  [
+    "What the server keeps",
+    [
+      "Snaps are stored only until every recipient has opened them, then the file is deleted. Snaps nobody opens are deleted after 24 hours.",
+      "Chat messages are deleted after 24 hours.",
+      "We don't keep copies after that. Snaps and chats are not end-to-end encrypted yet, so while they wait on the server, the server could technically read them.",
+      "To make the app work, the server keeps: your username and colour, who your friends are, your groups, who you've blocked, your signed-in devices (name and when last active) and the public half of your passkeys. Like any web server it can also log IP addresses.",
+      "Notifications go through Apple's or Google's push service and only say who sent something, never what.",
+      "No ads, no tracking, nothing sold.",
+    ],
+  ],
+  [
+    "Deleting",
+    [
+      "Profile → delete my account removes your account and everything above from the server, and frees your username for someone else.",
+    ],
+  ],
+  [
+    "Be decent",
+    [
+      "Don't send illegal stuff, don't harass people, don't send things to people who don't want them. Block anyone who bothers you.",
+      "The server owner can remove accounts that break this.",
+    ],
+  ],
+  [
+    "No promises",
+    [
+      "The app comes with no guarantee. It can go down, lose messages or change at any time.",
+      "Using it means you're fine with all of the above.",
+    ],
+  ],
+];
+
+export function Terms({ onClose }: { onClose: () => void }) {
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black text-white" data-nodrag>
+      <div className="mx-auto max-w-lg px-6 pb-[max(env(safe-area-inset-bottom),32px)] pt-[max(env(safe-area-inset-top),16px)]">
+        <div className="sticky top-0 -mx-6 flex items-center justify-between bg-black/90 px-6 py-3 backdrop-blur">
+          <h1 className="text-3xl font-black">the boring stuff</h1>
+          <button onClick={onClose} aria-label="close" className="grid h-12 w-12 place-items-center rounded-full bg-white/10 active:scale-90">
+            <X size={26} strokeWidth={2.75} />
+          </button>
+        </div>
+        {SECTIONS.map(([title, lines]) => (
+          <section key={title} className="mt-6">
+            <h2 className="text-lg font-black text-accent">{title}</h2>
+            {lines.map((l) => (
+              <p key={l} className="mt-2 leading-relaxed text-white/75" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+                {l}
+              </p>
+            ))}
+          </section>
+        ))}
+      </div>
+    </div>,
+    document.body
+  );
+}

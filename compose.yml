@@ -1,0 +1,17 @@
+services:
+  kicksnap:
+    build: .
+    image: kicksnap:latest
+    restart: unless-stopped
+    environment:
+      SNAP_TTL_HOURS: ${SNAP_TTL_HOURS:-24}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
+      RP_ID: ${RP_ID:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-https://github.com/robotman4/kicksnap}
+    volumes:
+      - kicksnap-data:/data
+    ports:
+      - "${PORT:-8080}:8000"
+
+volumes:
+  kicksnap-data:
