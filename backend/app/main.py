@@ -13,8 +13,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db as store
-from .api import API, VERSION, Unversioned, device_token
+from . import __version__, db as store
+from .api import API, Unversioned, device_token
 from .auth import current_user, public, router as auth_router, suspended, user_for_token
 from .limits import limit
 from .db import db
@@ -30,7 +30,7 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 STATIC_DIR = Path(os.getenv("STATIC_DIR", "../frontend/dist"))
 VIEW_SECONDS = {0, 3, 5, 10}
 
-app = FastAPI(title="Kicksnap", version=str(VERSION), docs_url=f"{API}/docs", openapi_url=f"{API}/openapi.json")
+app = FastAPI(title="Kicksnap", version=__version__, docs_url=f"{API}/docs", openapi_url=f"{API}/openapi.json")
 app.add_middleware(Unversioned)
 app.include_router(auth_router)
 app.include_router(push_router)
@@ -291,7 +291,9 @@ async def startup():
 
 @app.get(API + "/health")
 def health():
-    return {"ok": True, "api": API}
+    with db() as conn:
+        conn.execute("SELECT 1").fetchone()
+    return {"ok": True, "api": API, "version": __version__}
 
 
 # --- frontend ---------------------------------------------------------------
