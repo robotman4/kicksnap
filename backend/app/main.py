@@ -2,8 +2,8 @@ import asyncio
 import os
 import re
 import secrets
+import shutil
 import time
-from collections import defaultdict
 from pathlib import Path
 
 from fastapi import (
@@ -15,7 +15,10 @@ from pydantic import BaseModel
 
 from . import db as store
 from .auth import COOKIE, current_user, public, router as auth_router, user_for_token
-from .db import MEDIA_DIR, db
+from .db import db
+from .chat import are_friends, member_ids, router as chat_router
+from .hub import hub
+from .media import burn, media_path, overlay_path
 from .push import notify, router as push_router
 
 SNAP_TTL_HOURS = int(os.getenv("SNAP_TTL_HOURS", "24"))
@@ -26,6 +29,7 @@ VIEW_SECONDS = {0, 3, 5, 10}
 app = FastAPI(title="Kicksnap", docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.include_router(auth_router)
 app.include_router(push_router)
+app.include_router(chat_router)
 
 
 def now() -> int:
@@ -46,21 +50,6 @@ def update_me(body: Profile, user=Depends(current_user)):
 
 
 # --- realtime ---------------------------------------------------------------
-
-class Hub:
-    def __init__(self):
-        self.sockets: dict[int, set[WebSocket]] = defaultdict(set)
-
-    async def push(self, user_id: int, event: dict):
-        for ws in list(self.sockets.get(user_id, ())):
-            try:
-                await ws.send_json(event)
-            except Exception:
-                self.sockets[user_id].discard(ws)
-
-
-hub = Hub()
-
 
 @app.websocket("/ws")
 async def socket(ws: WebSocket):
@@ -143,27 +132,7 @@ async def remove_friend(username: str, user=Depends(current_user)):
     return {"ok": True}
 
 
-def are_friends(conn, a: int, b: int) -> bool:
-    return conn.execute(
-        "SELECT COUNT(*) FROM friendships WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)",
-        (a, b, b, a),
-    ).fetchone()[0] == 2
-
-
 # --- snaps ------------------------------------------------------------------
-
-def media_path(snap_id: str) -> Path:
-    return MEDIA_DIR / snap_id
-
-
-def overlay_path(snap_id: str) -> Path:
-    return MEDIA_DIR / f"{snap_id}.overlay.png"
-
-
-def burn(snap_id: str):
-    media_path(snap_id).unlink(missing_ok=True)
-    overlay_path(snap_id).unlink(missing_ok=True)
-
 
 async def save_upload(upload: UploadFile, dest: Path, limit: int) -> None:
     size = 0
@@ -181,12 +150,14 @@ async def save_upload(upload: UploadFile, dest: Path, limit: int) -> None:
 async def send_snap(
     file: UploadFile = File(...),
     overlay: UploadFile | None = File(None),
-    to: str = Form(...),
+    to: str = Form(""),
+    groups: str = Form(""),
     seconds: int = Form(5),
     user=Depends(current_user),
 ):
     names = {n.strip().lower() for n in to.split(",") if n.strip()}
-    if not names:
+    group_ids = {int(g) for g in groups.split(",") if g.strip().isdigit()}
+    if not names and not group_ids:
         raise HTTPException(400, "pick someone")
     if seconds not in VIEW_SECONDS:
         raise HTTPException(400, "bad timer")
@@ -204,75 +175,49 @@ async def send_snap(
             raise HTTPException(400, "overlay must be png")
         await save_upload(overlay, overlay_path(snap_id), 5 * 1024 * 1024)
 
+    me = user["id"]
+    # one snap row per conversation: direct friends share one, each group gets its own
+    # copy of the file, so each burns on its own schedule.
+    sent: list[tuple[str, int | None, list]] = []
     with db() as conn:
-        recipients = [
+        direct = [
             r for r in conn.execute(
-                f"SELECT id, username FROM users WHERE username IN ({','.join('?' * len(names))})",
-                tuple(names),
+                f"SELECT id, username FROM users WHERE username IN ({','.join('?' * len(names))})", tuple(names)
             ).fetchall()
-            if are_friends(conn, user["id"], r["id"])
-        ]
-        if not recipients:
+            if are_friends(conn, me, r["id"])
+        ] if names else []
+        targets: list[tuple[int | None, list, str]] = [(None, direct, "")] if direct else []
+        for gid in group_ids:
+            g = conn.execute("SELECT name FROM groups WHERE id = ?", (gid,)).fetchone()
+            members = member_ids(conn, gid)
+            if g and me in members:
+                others = [{"id": m, "username": None} for m in members if m != me]
+                targets.append((gid, others, g["name"]))
+        if not targets:
             burn(snap_id)
             raise HTTPException(400, "you can only snap friends")
-        conn.execute(
-            "INSERT INTO snaps VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (snap_id, user["id"], kind, mime, seconds, int(has_overlay), now()),
-        )
-        conn.executemany(
-            "INSERT INTO deliveries (snap_id, recipient_id) VALUES (?, ?)",
-            [(snap_id, r["id"]) for r in recipients],
-        )
-    for r in recipients:
-        await hub.push(r["id"], {"type": "snap", "from": user["username"]})
-        asyncio.create_task(notify(r["id"], {"title": "kicksnap", "body": f"new snap from @{user['username']} 📸", "tag": user["username"]}))
-    return {"id": snap_id, "sent_to": [r["username"] for r in recipients]}
-
-
-@app.get("/api/chats")
-def chats(user=Depends(current_user)):
-    """One row per friend with Snapchat-style state: new / received / delivered / opened."""
-    me = user["id"]
-    with db() as conn:
-        friends_ = conn.execute(
-            """
-            SELECT u.id, u.username, u.color FROM friendships a
-            JOIN friendships b ON b.user_id = a.friend_id AND b.friend_id = a.user_id
-            JOIN users u ON u.id = a.friend_id WHERE a.user_id = ?
-            """,
-            (me,),
-        ).fetchall()
-        out = []
-        for f in friends_:
-            new = conn.execute(
-                """SELECT s.id, s.kind, s.seconds, s.has_overlay, s.created_at FROM snaps s
-                   JOIN deliveries d ON d.snap_id = s.id
-                   WHERE s.sender_id = ? AND d.recipient_id = ? AND d.opened_at IS NULL
-                   ORDER BY s.created_at""",
-                (f["id"], me),
-            ).fetchall()
-            last = conn.execute(
-                """SELECT s.sender_id, s.created_at, d.opened_at FROM snaps s
-                   JOIN deliveries d ON d.snap_id = s.id
-                   WHERE (s.sender_id = :me AND d.recipient_id = :f) OR (s.sender_id = :f AND d.recipient_id = :me)
-                   ORDER BY s.created_at DESC LIMIT 1""",
-                {"me": me, "f": f["id"]},
-            ).fetchone()
-            if new:
-                state, at = "new", new[-1]["created_at"]
-            elif last is None:
-                state, at = "none", 0
-            elif last["sender_id"] == me:
-                state = "opened" if last["opened_at"] else "delivered"
-                at = last["opened_at"] or last["created_at"]
-            else:
-                state, at = "received", last["opened_at"] or last["created_at"]
-            out.append({
-                "username": f["username"], "color": f["color"], "state": state, "at": at,
-                "snaps": [dict(s) for s in new],
-            })
-    out.sort(key=lambda c: (c["state"] != "new", -c["at"], c["username"]))
-    return out
+        for n, (gid, recipients, _) in enumerate(targets):
+            sid = snap_id if n == 0 else secrets.token_urlsafe(16)
+            if n:
+                shutil.copyfile(media_path(snap_id), media_path(sid))
+                if has_overlay:
+                    shutil.copyfile(overlay_path(snap_id), overlay_path(sid))
+            conn.execute(
+                "INSERT INTO snaps (id, sender_id, kind, mime, seconds, has_overlay, created_at, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (sid, me, kind, mime, seconds, int(has_overlay), now(), gid),
+            )
+            conn.executemany(
+                "INSERT INTO deliveries (snap_id, recipient_id) VALUES (?, ?)", [(sid, r["id"]) for r in recipients]
+            )
+            sent.append((sid, gid, recipients))
+    for _, gid, recipients in sent:
+        for r in recipients:
+            await hub.push(r["id"], {"type": "snap", "from": user["username"]})
+            where = next((t[2] for t in targets if t[0] == gid), "") if gid else ""
+            body = f"new snap from @{user['username']} in {where} 📸" if gid else f"new snap from @{user['username']} 📸"
+            asyncio.create_task(notify(r["id"], {"title": "kicksnap", "body": body, "tag": f"g:{gid}" if gid else user["username"]}))
+    sent_to = [r["username"] for r in direct] + [t[2] for t in targets if t[0]]
+    return {"id": snap_id, "sent_to": sent_to}
 
 
 def _delivery(conn, snap_id: str, user_id: int):
@@ -329,6 +274,7 @@ def burn_expired() -> int:
         for snap_id in old:
             burn(snap_id)
         conn.execute("DELETE FROM snaps WHERE created_at < ?", (cutoff,))
+        conn.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
         # accounts that never picked a name
         conn.execute("DELETE FROM users WHERE username IS NULL AND created_at < ?", (now() - 86400,))
     return len(old)

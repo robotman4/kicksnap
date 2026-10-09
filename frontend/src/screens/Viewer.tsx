@@ -90,8 +90,8 @@ export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string
           ))}
         </div>
         <div className="mt-3 flex items-center gap-3">
-          <Avatar name={chat.username} color={chat.color} size={36} />
-          <span className="font-bold">{chat.username}</span>
+          <Avatar name={chat.name} color={chat.color} size={36} group={chat.group} />
+          <span className="font-bold">{chat.group ? `${snap.sender} · ${chat.name}` : chat.name}</span>
           <span className="text-sm text-white/60">{ago(snap.created_at)}</span>
         </div>
       </div>
@@ -100,7 +100,7 @@ export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string
         <button
           onPointerUp={(e) => {
             e.stopPropagation();
-            onDone(chat.username);
+            onDone(chat.key);
           }}
           className="rounded-full bg-accent px-8 py-4 text-xl font-black text-black shadow-[0_6px_0_rgba(0,0,0,.35)] transition ease-spring active:translate-y-1 active:scale-95 active:shadow-none"
         >

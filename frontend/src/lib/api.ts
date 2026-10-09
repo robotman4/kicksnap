@@ -1,8 +1,22 @@
 export type User = { username: string | null; color: string };
 export type Friend = { username: string; color: string };
-export type SnapMeta = { id: string; kind: "photo" | "video"; seconds: number; has_overlay: number; created_at: number };
+export type SnapMeta = { id: string; kind: "photo" | "video"; seconds: number; has_overlay: number; created_at: number; sender: string };
 export type ChatState = "new" | "received" | "delivered" | "opened" | "none";
-export type Chat = Friend & { state: ChatState; at: number; snaps: SnapMeta[] };
+/** key is "u:<username>" for a friend, "g:<id>" for a group. */
+export type Chat = { key: string; name: string; color: string; group: boolean; state: ChatState; kind: "snap" | "chat"; at: number; snaps: SnapMeta[]; unread: number };
+export type Message = { id: number; body: string; at: number; from: string; color: string; mine: boolean };
+export type InviteMode = "open" | "members" | "admin";
+export type Group = {
+  id: number;
+  key: string;
+  name: string;
+  color: string;
+  invite_mode: InviteMode;
+  admin: boolean;
+  can_invite: boolean;
+  code: string | null;
+  members: (Friend & { admin: boolean })[];
+};
 export type FriendLists = { friends: Friend[]; incoming: Friend[]; outgoing: Friend[] };
 export type Device = { id: number; label: string; created_at: number; seen_at: number; this: boolean };
 
@@ -56,20 +70,48 @@ export const api = {
   friends: () => call<FriendLists>("/api/friends"),
   addFriend: (username: string) => post<{ username: string; status: "friends" | "requested" }>("/api/friends", { username }),
   chats: () => call<Chat[]>("/api/chats"),
+  /** `to` holds chat keys: friends and groups in one list. */
   send: (blob: Blob, overlay: Blob | null, to: string[], seconds: number) => {
     const form = new FormData();
     form.append("file", blob, blob.type.startsWith("video") ? "snap.webm" : "snap.jpg");
     if (overlay) form.append("overlay", overlay, "overlay.png");
-    form.append("to", to.join(","));
+    form.append("to", to.filter((k) => k.startsWith("u:")).map((k) => k.slice(2)).join(","));
+    form.append("groups", to.filter((k) => k.startsWith("g:")).map((k) => k.slice(2)).join(","));
     form.append("seconds", String(seconds));
     return call<{ sent_to: string[] }>("/api/snaps", { method: "POST", body: form });
   },
   media: (id: string) => call<Blob>(`/api/snaps/${id}/media`),
   overlay: (id: string) => call<Blob>(`/api/snaps/${id}/overlay`),
   open: (id: string) => post(`/api/snaps/${id}/open`),
+
+  messages: (key: string) => call<{ messages: Message[]; seen_at: number }>(`/api/chats/${encodeURIComponent(key)}/messages`),
+  say: (key: string, body: string) => post(`/api/chats/${encodeURIComponent(key)}/messages`, { body }),
+  read: (key: string) => post(`/api/chats/${encodeURIComponent(key)}/read`),
+
+  newGroup: (name: string, members: string[]) => post<Group>("/api/groups", { name, members }),
+  group: (id: number) => call<Group>(`/api/groups/${id}`),
+  updateGroup: (id: number, patch: { name?: string; invite_mode?: InviteMode; admin?: string }) =>
+    call<Group>(`/api/groups/${id}`, { method: "PATCH", body: json(patch) }),
+  invite: (id: number, usernames: string[]) => post<Group>(`/api/groups/${id}/members`, { usernames }),
+  joinGroup: (code: string) => post<Group>("/api/groups/join", { code }),
+  removeMember: (id: number, username: string) => call(`/api/groups/${id}/members/${encodeURIComponent(username)}`, { method: "DELETE" }),
+  closeGroup: (id: number) => call(`/api/groups/${id}`, { method: "DELETE" }),
 };
 
-export type LiveEvent = { type: "snap"; from: string } | { type: "opened"; by: string } | { type: "friends" };
+/** Characters as people count them: one emoji is one. */
+export const MAX_CHARS = 160;
+const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+export const charCount = (s: string) => (segmenter ? [...segmenter.segment(s)].length : [...s].length);
+export const clip = (s: string, max = MAX_CHARS) =>
+  segmenter ? [...segmenter.segment(s)].slice(0, max).map((g) => g.segment).join("") : [...s].slice(0, max).join("");
+
+export type LiveEvent =
+  | { type: "snap"; from: string }
+  | { type: "opened"; by: string }
+  | { type: "friends" }
+  | { type: "message"; chat: string }
+  | { type: "read"; chat: string }
+  | { type: "group"; closed?: string };
 
 /** WebSocket with dumb exponential reconnect. The cookie authenticates it. */
 export function live(onConnect: () => void, onEvent: (e: LiveEvent) => void): () => void {

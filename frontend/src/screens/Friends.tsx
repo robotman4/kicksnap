@@ -128,7 +128,12 @@ export function Friends({
           onClose={() => setScanning(false)}
           onCode={(code) => {
             setScanning(false);
-            if (/^kicksnap-link:/i.test(code)) {
+            if (/^kicksnap-group:/i.test(code)) {
+              api.joinGroup(code).then(
+                (g) => (buzz(12), toast(`you're in ${g.name} 🎉`), onChanged()),
+                (e) => toast(e.message)
+              );
+            } else if (/^kicksnap-link:/i.test(code)) {
               api.linkApprove(code.replace(/^kicksnap-link:/i, "")).then(
                 () => toast("device added ✨"),
                 (e) => toast(e.message)

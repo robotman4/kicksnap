@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Media } from "../components/Media";
 import { Sheet } from "../components/Sheet";
-import { Friend } from "../lib/api";
 import { buzz, containRect, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
 import { useVisualViewport } from "../lib/viewport";
 import { Capture } from "./Camera";
@@ -101,14 +100,15 @@ const l0 = (l: Label | null) => l?.style;
 /** After the shutter: doodle, add text, pick people, send. */
 export function Preview({
   capture,
-  friends,
+  targets,
   preselect,
   onClose,
   onSend,
   onAddFriends,
 }: {
   capture: Capture;
-  friends: Friend[];
+  /** friends and groups, as chat keys */
+  targets: { key: string; name: string; color: string; group: boolean }[];
   preselect: string[];
   onClose: () => void;
   /** Called right away; `make` renders the final file, so the heavy work happens after the editor closes. */
@@ -188,6 +188,11 @@ export function Preview({
   const cycleTimer = () => {
     buzz(5);
     setSeconds(TIMERS[(TIMERS.indexOf(seconds as never) + 1) % TIMERS.length]);
+  };
+
+  const nameOf = (key: string) => {
+    const t = targets.find((x) => x.key === key);
+    return t ? (t.group ? t.name : `@${t.name}`) : key.slice(2);
   };
 
   const toggle = (name: string) => {
@@ -346,7 +351,7 @@ export function Preview({
             disabled={sending}
             className="flex items-center gap-3 rounded-full bg-accent py-5 pl-8 pr-6 text-2xl font-black text-black shadow-[0_6px_0_rgba(0,0,0,.35)] transition ease-spring active:translate-y-1 active:scale-95 active:shadow-none disabled:opacity-60"
           >
-            {preselect.length ? `@${preselect[0]}` : "send to"}
+            {preselect.length ? nameOf(preselect[0]) : "send to"}
             <Send size={26} strokeWidth={2.75} />
           </button>
         </div>
@@ -363,7 +368,7 @@ export function Preview({
         <div className="px-6 pb-2">
           <h2 className="text-3xl font-black">send to</h2>
         </div>
-        {friends.length === 0 ? (
+        {targets.length === 0 ? (
           <div className="flex flex-col items-center gap-4 px-8 pb-12 pt-6 text-center">
             <p className="text-lg text-white/60">No friends yet. Share your code and you're set.</p>
             <button onClick={onAddFriends} className="rounded-full bg-accent px-8 py-4 text-xl font-black text-black active:scale-95">
@@ -372,19 +377,19 @@ export function Preview({
           </div>
         ) : (
           <div className="grid max-h-[50vh] grid-cols-3 gap-y-6 overflow-y-auto px-4 pb-36 pt-3">
-            {friends.map((f) => {
-              const on = to.includes(f.username);
+            {targets.map((f) => {
+              const on = to.includes(f.key);
               return (
-                <button key={f.username} onClick={() => toggle(f.username)} className="flex flex-col items-center gap-2 transition ease-spring active:scale-90">
+                <button key={f.key} onClick={() => toggle(f.key)} className="flex flex-col items-center gap-2 transition ease-spring active:scale-90">
                   <div className="relative">
-                    <Avatar name={f.username} color={f.color} size={76} ring={on} />
+                    <Avatar name={f.name} color={f.color} size={76} ring={on} group={f.group} />
                     {on && (
                       <span className="absolute -bottom-1 -right-1 grid h-8 w-8 place-items-center rounded-full bg-accent text-black">
                         <Check size={20} strokeWidth={4} />
                       </span>
                     )}
                   </div>
-                  <span className={`max-w-full truncate text-sm font-bold ${on ? "text-white" : "text-white/60"}`}>{f.username}</span>
+                  <span className={`max-w-full truncate text-sm font-bold ${on ? "text-white" : "text-white/60"}`}>{f.name}</span>
                 </button>
               );
             })}
@@ -395,7 +400,7 @@ export function Preview({
             to.length ? "translate-y-0" : "translate-y-full"
           }`}
         >
-          <p className="flex-1 truncate text-xl font-black">{to.join(", ")}</p>
+          <p className="flex-1 truncate text-xl font-black">{to.map(nameOf).join(", ")}</p>
           <button
             onClick={() => send()}
             disabled={sending}

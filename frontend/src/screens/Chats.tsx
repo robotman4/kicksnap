@@ -1,23 +1,26 @@
-import { Camera as CameraIcon } from "lucide-react";
+import { Camera as CameraIcon, Plus } from "lucide-react";
 import { Avatar } from "../components/Avatar";
 import { PullToRefresh } from "../components/PullToRefresh";
 import { Chat, ChatState } from "../lib/api";
 import { ago } from "../lib/feel";
+
+// Snapchat colours: snaps in the accent, chat in blue.
+const CHAT_BLUE = "#3DC9FF";
 
 const STATE: Record<ChatState, { label: string; mark: "fill" | "line" | "arrow" | "arrowline" | null }> = {
   new: { label: "new snap", mark: "fill" },
   received: { label: "received", mark: "line" },
   delivered: { label: "delivered", mark: "arrow" },
   opened: { label: "opened", mark: "arrowline" },
-  none: { label: "tap to snap", mark: null },
+  none: { label: "tap to chat", mark: null },
 };
 
-function Mark({ kind }: { kind: (typeof STATE)[ChatState]["mark"] }) {
+function Mark({ kind, color }: { kind: (typeof STATE)[ChatState]["mark"]; color: string }) {
   if (!kind) return null;
-  if (kind === "fill") return <span className="h-3.5 w-3.5 rounded-[4px] bg-accent" />;
-  if (kind === "line") return <span className="h-3.5 w-3.5 rounded-[4px] border-2 border-accent" />;
+  if (kind === "fill") return <span className="h-3.5 w-3.5 rounded-[4px]" style={{ background: color }} />;
+  if (kind === "line") return <span className="h-3.5 w-3.5 rounded-[4px] border-2" style={{ borderColor: color }} />;
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" className="text-accent">
+    <svg width="14" height="14" viewBox="0 0 14 14" style={{ color }}>
       <path d="M2 1.5 12.5 7 2 12.5 4.5 7Z" fill={kind === "arrow" ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
     </svg>
   );
@@ -34,11 +37,39 @@ function Sending() {
   );
 }
 
-export function Chats({ chats, outgoing, onOpen, onSnapBack, onFriends, onRefresh }: { chats: Chat[]; outgoing: Outgoing; onOpen: (c: Chat) => void; onSnapBack: (name: string) => void; onFriends: () => void; onRefresh: () => Promise<unknown> }) {
+function status(c: Chat) {
+  const s = STATE[c.state];
+  if (c.state === "new" && c.kind === "chat") return c.unread > 1 ? `${c.unread} new chats` : "new chat";
+  if (c.state === "new") return c.snaps.length > 1 ? `${c.snaps.length} new snaps` : "new snap";
+  return s.label;
+}
+
+export function Chats({
+  chats,
+  outgoing,
+  onOpen,
+  onTalk,
+  onSnapBack,
+  onFriends,
+  onNewGroup,
+  onRefresh,
+}: {
+  chats: Chat[];
+  outgoing: Outgoing;
+  onOpen: (c: Chat) => void;
+  onTalk: (c: Chat) => void;
+  onSnapBack: (key: string) => void;
+  onFriends: () => void;
+  onNewGroup: () => void;
+  onRefresh: () => Promise<unknown>;
+}) {
   return (
     <div className="flex h-full flex-col bg-black text-white">
-      <header className="px-5 pb-3 pt-[max(env(safe-area-inset-top),18px)]">
+      <header className="flex items-center justify-between px-5 pb-3 pt-[max(env(safe-area-inset-top),18px)]">
         <h1 className="text-4xl font-black tracking-tight">chats</h1>
+        <button onClick={onNewGroup} aria-label="new group" className="flex items-center gap-1.5 rounded-full bg-white/10 py-2.5 pl-3 pr-4 font-bold active:scale-95">
+          <Plus size={20} strokeWidth={3} /> group
+        </button>
       </header>
       <PullToRefresh onRefresh={onRefresh} className="flex-1 pb-24">
         {chats.length === 0 && (
@@ -50,35 +81,36 @@ export function Chats({ chats, outgoing, onOpen, onSnapBack, onFriends, onRefres
             </button>
           </div>
         )}
-        {[...chats.filter((c) => outgoing[c.username]), ...chats.filter((c) => !outgoing[c.username])].map((c) => {
-          const s = STATE[c.state];
+        {[...chats.filter((c) => outgoing[c.key]), ...chats.filter((c) => !outgoing[c.key])].map((c) => {
           const isNew = c.state === "new";
-          const out = outgoing[c.username];
+          const out = outgoing[c.key];
+          const color = c.kind === "chat" ? CHAT_BLUE : "rgb(var(--accent))";
           return (
-            <div key={c.username} className="flex items-center gap-1 pr-3">
+            <div key={c.key} className="flex items-center gap-1 pr-3">
               <button
-                onClick={() => (out?.failed ? out.retry() : isNew ? onOpen(c) : out ? undefined : onSnapBack(c.username))}
+                // new snaps play first; otherwise the name opens the chat
+                onClick={() => (out?.failed ? out.retry() : c.snaps.length ? onOpen(c) : onTalk(c))}
                 className="flex min-w-0 flex-1 items-center gap-4 px-5 py-3 text-left transition active:bg-white/5"
               >
-                <Avatar name={c.username} color={c.color} size={52} />
+                <Avatar name={c.name} color={c.color} size={52} group={c.group} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-lg font-bold">{c.username}</p>
+                  <p className="truncate text-lg font-bold">{c.name}</p>
                   {out ? (
                     <p className={`flex items-center gap-2 text-sm font-bold ${out.failed ? "text-red-400" : "text-accent"}`}>
                       {out.failed ? "didn't send · tap to retry" : <><Sending /> sending…</>}
                     </p>
                   ) : (
-                    <p className={`flex items-center gap-2 text-sm ${isNew ? "font-bold text-accent" : "text-white/50"}`}>
-                      <Mark kind={s.mark} />
-                      {isNew && c.snaps.length > 1 ? `${c.snaps.length} new snaps` : s.label}
-                      {c.at > 0 && <span className="text-white/35">· {ago(c.at)}</span>}
+                    <p className={`flex items-center gap-2 text-sm ${isNew ? "font-bold" : "text-white/50"}`} style={isNew ? { color } : undefined}>
+                      <Mark kind={STATE[c.state].mark} color={color} />
+                      {status(c)}
+                      {c.at > 0 && c.state !== "none" && <span className="text-white/35">· {ago(c.at)}</span>}
                     </p>
                   )}
                 </div>
               </button>
               <button
-                onClick={() => onSnapBack(c.username)}
-                aria-label={`snap ${c.username}`}
+                onClick={() => onSnapBack(c.key)}
+                aria-label={`snap ${c.name}`}
                 className="grid h-11 w-11 place-items-center rounded-full text-white/60 active:scale-90 active:bg-white/10"
               >
                 <CameraIcon size={22} />

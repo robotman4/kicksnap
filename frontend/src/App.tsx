@@ -11,6 +11,8 @@ import { Friends } from "./screens/Friends";
 import { PickName, Welcome } from "./screens/Onboard";
 import { Preview } from "./screens/Preview";
 import { Settings } from "./screens/Settings";
+import { GroupInfo, NewGroup } from "./screens/Groups";
+import { Thread } from "./screens/Thread";
 import { Viewer } from "./screens/Viewer";
 
 const CHATS = 0;
@@ -48,6 +50,11 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
   const [capture, setCapture] = useState<Capture | null>(null);
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [viewing, setViewing] = useState<Chat | null>(null);
+  const [talking, setTalking] = useState<Chat | null>(null);
+  const [groupInfo, setGroupInfo] = useState<number | null>(null);
+  const [making, setMaking] = useState(false);
+  // bumps on every live event so open screens refetch
+  const [tick, setTick] = useState(0);
   const [settings, setSettings] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [askPush, setAskPush] = useState(false);
@@ -70,8 +77,13 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
     document.addEventListener("visibilitychange", back);
     const stop = live(refresh, (e) => {
       refresh();
-      if (e.type === "snap") {
+      setTick((t) => t + 1);
+      if (e.type === "snap" || e.type === "message") {
         buzz([10, 60, 10]);
+      }
+      if (e.type === "group" && e.closed) {
+        setTalking((c) => (c?.key === e.closed ? null : c));
+        setGroupInfo((g) => (`g:${g}` === e.closed ? null : g));
       }
     });
     return () => {
@@ -82,9 +94,17 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
 
   const unread = chats.reduce((n, c) => n + c.snaps.length, 0);
 
-  const snapAt = (name: string) => {
-    setReplyTo(name);
+  /** Open the camera aimed at a chat (key: "u:name" or "g:id"). */
+  const snapAt = (key: string) => {
+    setReplyTo(key);
+    setTalking(null);
     setPage(CAMERA);
+  };
+  // keep an open thread's header in sync with the list (renames, colours)
+  const talkingNow = talking && (chats.find((c) => c.key === talking.key) ?? talking);
+  const nameOf = (key: string) => {
+    const c = chats.find((x) => x.key === key);
+    return c ? (c.group ? c.name : `@${c.name}`) : `@${key.slice(2)}`;
   };
 
   // Sends run in the background: the editor closes straight away and the chat rows
@@ -134,17 +154,26 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
   return (
     <div className="h-full bg-black">
       <Pager index={page} onChange={setPage}>
-        <Chats chats={chats} outgoing={outgoing} onRefresh={refresh} onOpen={setViewing} onSnapBack={snapAt} onFriends={() => setPage(FRIENDS)} />
+        <Chats
+          chats={chats}
+          outgoing={outgoing}
+          onRefresh={refresh}
+          onOpen={setViewing}
+          onTalk={setTalking}
+          onSnapBack={snapAt}
+          onFriends={() => setPage(FRIENDS)}
+          onNewGroup={() => setMaking(true)}
+        />
         <Camera
           me={me}
-          active={page === CAMERA && !capture && !viewing}
+          active={page === CAMERA && !capture && !viewing && !talking}
           unread={unread}
           onCapture={setCapture}
           onChats={() => setPage(CHATS)}
           onFriends={() => setPage(FRIENDS)}
           onSettings={() => setSettings(true)}
         />
-        <Friends me={me} lists={lists} onChanged={refresh} onSnap={snapAt} toast={setToast} />
+        <Friends me={me} lists={lists} onChanged={refresh} onSnap={(n) => snapAt(`u:${n}`)} toast={setToast} />
       </Pager>
 
       {replyTo && page === CAMERA && !capture && (
@@ -153,7 +182,7 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
             className="pointer-events-auto rounded-full bg-accent px-4 py-2 text-sm font-black text-black shadow-xl"
             onClick={() => setReplyTo(null)}
           >
-            snapping @{replyTo} ✕
+            snapping {nameOf(replyTo)} ✕
           </button>
         </div>
       )}
@@ -162,7 +191,7 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
         <Preview
           key={capture.url}
           capture={capture}
-          friends={lists.friends}
+          targets={chats}
           preselect={replyTo ? [replyTo] : []}
           onClose={() => {
             URL.revokeObjectURL(capture.url);
@@ -186,6 +215,45 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
           }}
         />
       )}
+
+      {talkingNow && (
+        <Thread
+          chat={talkingNow}
+          tick={tick}
+          onClose={() => {
+            setTalking(null);
+            refresh();
+          }}
+          onSnap={() => snapAt(talkingNow.key)}
+          onInfo={() => talkingNow.group && setGroupInfo(Number(talkingNow.key.slice(2)))}
+        />
+      )}
+
+      <NewGroup
+        open={making}
+        friends={lists.friends}
+        onClose={() => setMaking(false)}
+        onMade={(g) => {
+          setMaking(false);
+          refresh();
+          setPage(CHATS);
+          setTalking({ key: g.key, name: g.name, color: g.color, group: true, state: "none", kind: "chat", at: 0, snaps: [], unread: 0 });
+        }}
+        toast={setToast}
+      />
+      <GroupInfo
+        id={groupInfo}
+        me={me.username}
+        friends={lists.friends}
+        tick={tick}
+        onClose={() => setGroupInfo(null)}
+        onGone={() => {
+          setGroupInfo(null);
+          setTalking(null);
+          refresh();
+        }}
+        toast={setToast}
+      />
 
       <Settings
         open={settings}
