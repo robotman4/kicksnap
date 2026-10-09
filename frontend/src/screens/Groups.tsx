@@ -230,10 +230,16 @@ export function GroupInfo({
 
           <button
             onClick={() => run(api.removeMember(g.id, me), onGone)}
-            className="mt-8 flex w-full items-center justify-center gap-2 rounded-full bg-white/5 py-5 text-lg font-bold text-white/60 active:scale-[.98]"
+            disabled={g.admin}
+            className="mt-8 flex w-full items-center justify-center gap-2 rounded-full bg-white/5 py-5 text-lg font-bold text-white/60 active:scale-[.98] disabled:opacity-40 disabled:active:scale-100"
           >
             <LogOut size={22} /> leave group
           </button>
+          {g.admin && (
+            <p className="mt-2 text-center text-sm text-white/40">
+              {g.members.length > 1 ? "You're the admin. Tap \"make admin\" on someone to hand it over, then you can leave." : "You're the only one here. Close the group instead."}
+            </p>
+          )}
           {g.admin && (
             <button
               onClick={() => (confirmClose ? run(api.closeGroup(g.id), onGone) : setConfirmClose(true))}

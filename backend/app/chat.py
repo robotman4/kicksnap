@@ -438,7 +438,7 @@ async def join(body: Join, user=Depends(current_user)):
 
 @router.delete("/groups/{group_id}/members/{username}")
 async def remove_member(group_id: int, username: str, user=Depends(current_user)):
-    """Leave (your own name) or, as admin, remove someone. The admin leaving hands over to the longest member."""
+    """Leave (your own name) or, as admin, remove someone. The admin can't leave; they hand over or close."""
     me = user["id"]
     with db() as conn:
         g = _group(conn, me, group_id)
@@ -447,6 +447,8 @@ async def remove_member(group_id: int, username: str, user=Depends(current_user)
             raise HTTPException(404, "not in the group")
         if target["id"] != me and g["admin_id"] != me:
             raise HTTPException(403, "only the admin can remove people")
+        if target["id"] == me == g["admin_id"]:
+            raise HTTPException(400, "make someone else admin before you leave")
         before = member_ids(conn, group_id)
         conn.execute("DELETE FROM group_members WHERE group_id = ? AND user_id = ?", (group_id, target["id"]))
         left = member_ids(conn, group_id)
