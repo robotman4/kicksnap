@@ -49,6 +49,10 @@ export const api = {
   passkeyLoginFinish: (challenge_id: string, credential: unknown) =>
     post<User>("/api/passkeys/login/finish", { challenge_id, credential }),
 
+  pushKey: () => call<{ key: string }>("/api/push/key"),
+  pushSubscribe: (sub: PushSubscriptionJSON) => post("/api/push/subscribe", sub),
+  pushUnsubscribe: (endpoint: string) => post("/api/push/unsubscribe", { endpoint }),
+
   friends: () => call<FriendLists>("/api/friends"),
   addFriend: (username: string) => post<{ username: string; status: "friends" | "requested" }>("/api/friends", { username }),
   chats: () => call<Chat[]>("/api/chats"),
@@ -68,10 +72,11 @@ export const api = {
 export type LiveEvent = { type: "snap"; from: string } | { type: "opened"; by: string } | { type: "friends" };
 
 /** WebSocket with dumb exponential reconnect. The cookie authenticates it. */
-export function live(onEvent: (e: LiveEvent) => void): () => void {
+export function live(onConnect: () => void, onEvent: (e: LiveEvent) => void): () => void {
   let ws: WebSocket | null = null;
   let ping: number | undefined;
   let retry = 1000;
+  let reconnects = 0;
   let closed = false;
 
   const connect = () => {
@@ -79,6 +84,8 @@ export function live(onEvent: (e: LiveEvent) => void): () => void {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(`${proto}://${location.host}/ws`);
     ws.onopen = () => {
+      // anything that happened while we were disconnected
+      if (retry > 1000 || reconnects++) onConnect();
       retry = 1000;
       ping = window.setInterval(() => ws?.send("ping"), 25000);
     };

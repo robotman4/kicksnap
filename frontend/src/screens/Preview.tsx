@@ -5,6 +5,7 @@ import { Media } from "../components/Media";
 import { Sheet } from "../components/Sheet";
 import { Friend } from "../lib/api";
 import { buzz, containRect, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
+import { useVisualViewport } from "../lib/viewport";
 import { Capture } from "./Camera";
 
 // Strokes and text are stored in 0..1 coordinates of the screen. The photo is shown
@@ -95,6 +96,8 @@ async function compose(capture: Capture, dims: { w: number; h: number }, strokes
     : { file: capture.blob, overlay: await out("image/png") };
 }
 
+const l0 = (l: Label | null) => l?.style;
+
 /** After the shutter: doodle, add text, pick people, send. */
 export function Preview({
   capture,
@@ -121,6 +124,8 @@ export function Preview({
   const [sending, setSending] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const rect = containRect(dims.w, dims.h);
+  const vv = useVisualViewport();
+  const typing = mode === "text";
   const canvas = useRef<HTMLCanvasElement>(null);
   const drawing = useRef<Stroke | null>(null);
   const textInput = useRef<HTMLInputElement>(null);
@@ -212,7 +217,11 @@ export function Preview({
     buzz(8);
   };
 
-  const labelStyle = (l: Label): React.CSSProperties =>
+  // While typing, the text sits just above the keyboard (Snapchat-style) and drops
+  // back to its spot when done. The photo itself never moves.
+  const typingSpot = { top: vv.height - 24, transform: l0(label) === "bar" ? "translateY(-100%)" : "translate(-50%,-100%)" };
+  const labelStyle = (l: Label): React.CSSProperties => ({ ...baseLabelStyle(l), ...(typing ? typingSpot : {}) });
+  const baseLabelStyle = (l: Label): React.CSSProperties =>
     l.style === "bar"
       ? { top: `${l.y * 100}%`, left: rect.x, width: rect.w, fontSize: `${FONT.bar * 100}vh`, transform: "translateY(-50%)" }
       : {
@@ -226,7 +235,12 @@ export function Preview({
         };
 
   return (
-    <div className="fixed inset-0 z-30 animate-[pop_.25s_ease-out] touch-none bg-black text-white" data-nodrag>
+    <div
+      className="fixed inset-0 z-30 animate-[pop_.25s_ease-out] touch-none bg-black text-white"
+      data-nodrag
+      // iOS pans the page up to show the focused field; undo that so the photo stays put
+      style={typing && vv.top ? { transform: `translateY(${vv.top}px)` } : undefined}
+    >
       <Media src={capture.url} kind={capture.kind} loop onDims={setDims} />
 
       <canvas

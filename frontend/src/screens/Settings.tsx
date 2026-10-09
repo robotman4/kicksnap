@@ -1,4 +1,4 @@
-import { Check, Fingerprint, LogOut, QrCode, Smartphone, X } from "lucide-react";
+import { Bell, BellOff, Check, Fingerprint, LogOut, QrCode, Smartphone, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Scanner } from "../components/Scanner";
@@ -6,6 +6,7 @@ import { Sheet } from "../components/Sheet";
 import { api, Device, User } from "../lib/api";
 import { ACCENTS, ago, buzz, onColor, timerLabel, TIMERS } from "../lib/feel";
 import { addPasskey, passkeysSupported } from "../lib/passkey";
+import { disablePush, enablePush, pushState, PushState } from "../lib/push";
 
 export function Settings({
   open,
@@ -29,6 +30,7 @@ export function Settings({
   const [devices, setDevices] = useState<Device[]>([]);
   const [passkeys, setPasskeys] = useState(0);
   const [scanning, setScanning] = useState(false);
+  const [push, setPush] = useState<PushState>("unsupported");
 
   const load = () =>
     api
@@ -40,8 +42,20 @@ export function Settings({
       .catch(() => {});
 
   useEffect(() => {
-    if (open) load();
+    if (!open) return;
+    load();
+    pushState().then(setPush);
   }, [open]);
+
+  const togglePush = async () => {
+    buzz(8);
+    if (push === "install-first") return toast("tap Share → Add to Home Screen, then open kicksnap from there");
+    if (push === "denied") return toast("notifications are blocked in your browser settings");
+    if (push === "unsupported") return toast("this browser can't do notifications");
+    const next = push === "on" ? await disablePush() : await enablePush().catch(() => "off" as const);
+    setPush(next);
+    if (next === "on") toast("notifications on 🔔");
+  };
 
   const passkey = async () => {
     try {
@@ -76,6 +90,9 @@ export function Settings({
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-3">
+            <Tile onClick={togglePush} icon={push === "on" ? <Bell size={30} strokeWidth={2.5} /> : <BellOff size={30} strokeWidth={2.5} />} wide on={push === "on"}>
+              {push === "on" ? "notifications on" : push === "install-first" ? "notifications: add to home screen first" : "turn on notifications"}
+            </Tile>
             <Tile onClick={() => setScanning(true)} icon={<QrCode size={30} strokeWidth={2.5} />}>
               add a device
             </Tile>
@@ -161,13 +178,15 @@ function Label({ children }: { children: React.ReactNode }) {
   return <p className="mb-3 mt-8 text-sm font-black uppercase tracking-wider text-white/40">{children}</p>;
 }
 
-function Tile({ children, icon, onClick }: { children: React.ReactNode; icon: React.ReactNode; onClick: () => void }) {
+function Tile({ children, icon, onClick, wide, on }: { children: React.ReactNode; icon: React.ReactNode; onClick: () => void; wide?: boolean; on?: boolean }) {
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-start gap-3 rounded-[1.75rem] bg-white/10 p-5 text-left text-lg font-black leading-tight transition ease-spring active:scale-95 active:bg-white/15"
+      className={`flex items-start gap-3 rounded-[1.75rem] p-5 text-left text-lg font-black leading-tight transition ease-spring active:scale-95 ${
+        wide ? "col-span-2 flex-row items-center" : "flex-col"
+      } ${on ? "bg-accent text-black" : "bg-white/10 active:bg-white/15"}`}
     >
-      <span className="text-accent">{icon}</span>
+      <span className={on ? "" : "text-accent"}>{icon}</span>
       {children}
     </button>
   );

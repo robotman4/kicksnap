@@ -1,6 +1,7 @@
 import { Plus, ScanLine } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
+import { PullToRefresh } from "../components/PullToRefresh";
 import { Scanner } from "../components/Scanner";
 import { Avatar } from "../components/Avatar";
 import { api, FriendLists, User } from "../lib/api";
@@ -15,7 +16,7 @@ export function Friends({
 }: {
   me: User;
   lists: FriendLists;
-  onChanged: () => void;
+  onChanged: () => Promise<unknown>;
   onSnap: (name: string) => void;
   toast: (t: string) => void;
 }) {
@@ -47,7 +48,7 @@ export function Friends({
         <h1 className="text-4xl font-black tracking-tight">friends</h1>
       </header>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain px-5 pb-24">
+      <PullToRefresh onRefresh={onChanged} className="flex-1 px-5 pb-24">
         {/* your code */}
         <div className="flex items-center gap-5 rounded-[2rem] bg-accent p-5 text-black">
           <div className="h-28 w-28 shrink-0 rounded-2xl bg-accent">{qr && <img src={qr} alt="your code" className="h-full w-full" />}</div>
@@ -119,7 +120,7 @@ export function Friends({
             ))}
           </Section>
         )}
-      </div>
+      </PullToRefresh>
 
       {scanning && (
         <Scanner

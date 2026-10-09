@@ -1,5 +1,6 @@
 import { Camera as CameraIcon } from "lucide-react";
 import { Avatar } from "../components/Avatar";
+import { PullToRefresh } from "../components/PullToRefresh";
 import { Chat, ChatState } from "../lib/api";
 import { ago } from "../lib/feel";
 
@@ -22,13 +23,13 @@ function Mark({ kind }: { kind: (typeof STATE)[ChatState]["mark"] }) {
   );
 }
 
-export function Chats({ chats, onOpen, onSnapBack, onFriends }: { chats: Chat[]; onOpen: (c: Chat) => void; onSnapBack: (name: string) => void; onFriends: () => void }) {
+export function Chats({ chats, onOpen, onSnapBack, onFriends, onRefresh }: { chats: Chat[]; onOpen: (c: Chat) => void; onSnapBack: (name: string) => void; onFriends: () => void; onRefresh: () => Promise<unknown> }) {
   return (
     <div className="flex h-full flex-col bg-black text-white">
       <header className="px-5 pb-3 pt-[max(env(safe-area-inset-top),18px)]">
         <h1 className="text-4xl font-black tracking-tight">chats</h1>
       </header>
-      <div className="flex-1 overflow-y-auto overscroll-contain pb-24">
+      <PullToRefresh onRefresh={onRefresh} className="flex-1 pb-24">
         {chats.length === 0 && (
           <div className="flex flex-col items-center gap-4 px-10 pt-24 text-center">
             <p className="text-2xl font-black">quiet in here</p>
@@ -67,7 +68,7 @@ export function Chats({ chats, onOpen, onSnapBack, onFriends }: { chats: Chat[];
             </div>
           );
         })}
-      </div>
+      </PullToRefresh>
     </div>
   );
 }

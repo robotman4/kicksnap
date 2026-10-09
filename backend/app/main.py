@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from . import db as store
 from .auth import COOKIE, current_user, public, router as auth_router, user_for_token
 from .db import MEDIA_DIR, db
+from .push import notify, router as push_router
 
 SNAP_TTL_HOURS = int(os.getenv("SNAP_TTL_HOURS", "24"))
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
@@ -24,6 +25,7 @@ VIEW_SECONDS = {0, 3, 5, 10}
 
 app = FastAPI(title="Kicksnap", docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.include_router(auth_router)
+app.include_router(push_router)
 
 
 def now() -> int:
@@ -122,6 +124,8 @@ async def add_friend(body: AddFriend, user=Depends(current_user)):
             "SELECT 1 FROM friendships WHERE user_id = ? AND friend_id = ?", (other["id"], user["id"])
         ).fetchone()
     await hub.push(other["id"], {"type": "friends"})
+    body = f"@{user['username']} accepted you 🙌" if mutual else f"@{user['username']} added you"
+    asyncio.create_task(notify(other["id"], {"title": "kicksnap", "body": body, "tag": f"friend-{user['username']}"}))
     return {"username": other["username"], "status": "friends" if mutual else "requested"}
 
 
@@ -221,6 +225,7 @@ async def send_snap(
         )
     for r in recipients:
         await hub.push(r["id"], {"type": "snap", "from": user["username"]})
+        asyncio.create_task(notify(r["id"], {"title": "kicksnap", "body": f"new snap from @{user['username']} 📸", "tag": user["username"]}))
     return {"id": snap_id, "sent_to": [r["username"] for r in recipients]}
 
 

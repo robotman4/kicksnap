@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Pager } from "./components/Pager";
 import { Toast } from "./components/Toast";
 import { api, Chat, FriendLists, live, User } from "./lib/api";
+import { Bell } from "lucide-react";
 import { applyAccent, buzz, pref } from "./lib/feel";
+import { enablePush, pushState, syncPush } from "./lib/push";
 import { Camera, Capture } from "./screens/Camera";
 import { Chats } from "./screens/Chats";
 import { Friends } from "./screens/Friends";
@@ -46,24 +48,34 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
   const [viewing, setViewing] = useState<Chat | null>(null);
   const [settings, setSettings] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [askPush, setAskPush] = useState(false);
   const [seconds, setSeconds] = useState(() => Number(pref.get("seconds", "5")));
 
-  const refresh = useCallback(() => {
-    api.chats().then(setChats).catch(() => {});
-    api.friends().then(setLists).catch(() => {});
-  }, []);
+  const refresh = useCallback(
+    () =>
+      Promise.all([
+        api.chats().then(setChats).catch(() => {}),
+        api.friends().then(setLists).catch(() => {}),
+      ]),
+    []
+  );
 
   useEffect(() => {
     refresh();
-    return live((e) => {
+    syncPush();
+    // Phones drop the socket when the app is backgrounded, so catch up on return.
+    const back = () => !document.hidden && refresh();
+    document.addEventListener("visibilitychange", back);
+    const stop = live(refresh, (e) => {
       refresh();
       if (e.type === "snap") {
         buzz([10, 60, 10]);
-        if (document.hidden && "Notification" in window && Notification.permission === "granted") {
-          new Notification("kicksnap", { body: `new snap from @${e.from}`, icon: "/icon.svg", tag: e.from });
-        }
       }
     });
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", back);
+    };
   }, [refresh]);
 
   const unread = chats.reduce((n, c) => n + c.snaps.length, 0);
@@ -83,8 +95,11 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
       setCapture(null);
       setReplyTo(null);
       refresh();
-      // ask once, after the first snap actually goes out
-      if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+      // offer notifications once, right after the first snap goes out
+      if (!pref.get("asked-push", "")) {
+        pref.set("asked-push", "1");
+        pushState().then((s) => s === "off" && setAskPush(true));
+      }
     } catch (e) {
       setToast((e as Error).message);
     }
@@ -93,7 +108,7 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
   return (
     <div className="h-full bg-black">
       <Pager index={page} onChange={setPage}>
-        <Chats chats={chats} onOpen={setViewing} onSnapBack={snapAt} onFriends={() => setPage(FRIENDS)} />
+        <Chats chats={chats} onRefresh={refresh} onOpen={setViewing} onSnapBack={snapAt} onFriends={() => setPage(FRIENDS)} />
         <Camera
           me={me}
           active={page === CAMERA && !capture && !viewing}
@@ -164,6 +179,26 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
         }}
         toast={setToast}
       />
+
+      {askPush && (
+        <div className="fixed inset-x-4 bottom-[max(env(safe-area-inset-bottom),20px)] z-40 flex animate-[pop_.25s_ease-out] items-center gap-3 rounded-[2rem] bg-white p-3 pl-5 text-black shadow-2xl">
+          <Bell size={28} strokeWidth={2.5} className="shrink-0" />
+          <p className="flex-1 text-lg font-black leading-tight">know when they snap back?</p>
+          <button onClick={() => setAskPush(false)} className="rounded-full px-3 py-3 font-bold text-black/50">
+            nah
+          </button>
+          <button
+            onClick={async () => {
+              setAskPush(false);
+              const s = await enablePush().catch(() => "off");
+              setToast(s === "on" ? "notifications on 🔔" : "notifications are off");
+            }}
+            className="rounded-full bg-black px-5 py-3 font-black text-accent active:scale-95"
+          >
+            yes
+          </button>
+        </div>
+      )}
 
       <Toast text={toast} onDone={() => setToast(null)} />
     </div>

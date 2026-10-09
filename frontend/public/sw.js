@@ -1,5 +1,5 @@
 // App-shell cache only. Snaps and API calls always go to the network.
-const CACHE = "kicksnap-v1";
+const CACHE = "kicksnap-v2";
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/", "/manifest.webmanifest", "/icon.svg"])));
@@ -24,5 +24,39 @@ self.addEventListener("fetch", (e) => {
         return res;
       })
       .catch(() => caches.match(e.request).then((r) => r || caches.match("/")))
+  );
+});
+
+// --- push -------------------------------------------------------------------
+
+self.addEventListener("push", (e) => {
+  let data = {};
+  try {
+    data = e.data ? e.data.json() : {};
+  } catch {
+    /* empty or not json */
+  }
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      // the app is open and on screen: it already updated live, no need to buzz twice
+      if (wins.some((w) => w.visibilityState === "visible")) return;
+      return self.registration.showNotification(data.title || "kicksnap", {
+        body: data.body || "new snap",
+        tag: data.tag || "kicksnap",
+        renotify: true,
+        icon: "/icon.svg",
+        badge: "/icon.svg",
+      });
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      const win = wins[0];
+      return win ? win.focus() : self.clients.openWindow("/");
+    })
   );
 });

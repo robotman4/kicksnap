@@ -30,6 +30,15 @@ CREATE TABLE IF NOT EXISTS passkeys (
     sign_count  INTEGER NOT NULL DEFAULT 0,
     created_at  INTEGER NOT NULL
 );
+-- web push subscriptions, one per device that turned notifications on
+CREATE TABLE IF NOT EXISTS push_subs (
+    endpoint    TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id   INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    p256dh      TEXT NOT NULL,
+    auth        TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
+);
 -- one row per direction; accepted friendships have both rows
 CREATE TABLE IF NOT EXISTS friendships (
     user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -13,6 +13,7 @@ Self-hosted snap app. Open, snap, send. Snaps burn after they're viewed.
 - **No passwords, ever.** A new device either says "I'm new" (then you pick a name) or "I've got an account".
   Then you either use a passkey, or scan the QR it shows from a phone that's already signed in.
 - **Add friends by QR.** Your code is on the friends screen. Scan theirs, or type their name.
+- **Notifications.** Push for new snaps and friend requests, even with the app closed. Pull down on chats or friends to refresh.
 
 ## Screens
 
@@ -42,6 +43,17 @@ snap.example.com {
 WebSockets (`/ws`) pass through Caddy with no extra config.
 
 Data (SQLite + media) lives in the `kicksnap-data` volume at `/data`.
+
+### Notifications
+
+Web Push with VAPID, no third-party service of your own needed (the browser's push service delivers it).
+The VAPID key is generated on first start and stored as `/data/vapid.pem`; keep it, or every device has to
+turn notifications on again. Payloads only say who sent something, never the snap.
+
+- **iPhone:** Apple only allows web push for apps added to the home screen (Share → Add to Home Screen, iOS 16.4+).
+  Settings says so when it's opened in a normal Safari tab.
+- **Android:** works in Chrome, installed or not.
+- Set `VAPID_SUBJECT` to a `mailto:` or `https:` URL you own (Apple rejects some placeholders).
 
 ### Sign-in
 
