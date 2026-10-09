@@ -11,6 +11,7 @@ import unicodedata
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from .api import API
 from .auth import current_user, now, suspended
 from .limits import limit
 from .db import db
@@ -18,7 +19,7 @@ from .hub import hub
 from .media import burn
 from .push import notify
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix=API)
 
 MAX_CHARS = 160
 INVITE_MODES = {"open", "members", "admin"}

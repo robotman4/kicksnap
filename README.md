@@ -64,6 +64,7 @@ turn notifications on again. Payloads only say who sent something, never the sna
   if you serve on several hostnames. Passkeys need HTTPS (or `localhost`).
 - Signed-in devices are listed under your face → "signed in on". Remove any from there.
 - Accounts that never pick a name are deleted after a day.
+- Native apps and scripts use the same device secret as a bearer token instead of a cookie (see API below).
 
 ## How snaps burn
 
@@ -105,7 +106,22 @@ DATA_DIR=./data uvicorn app.main:app --reload
 cd frontend && npm install && npm run dev
 ```
 
-API docs: http://localhost:8000/api/docs
+## API
+
+- Everything lives under `/api/v1` (realtime socket: `/api/v1/ws`). Old `/api/...` and `/ws` paths are aliases
+  for v1, so existing clients keep working. A breaking change ships as `/api/v2` next to it.
+- Docs: http://localhost:8000/api/v1/docs (OpenAPI at `/api/v1/openapi.json`).
+- Auth is either the `ks_device` cookie (the web app) or `Authorization: Bearer <secret>`, on HTTP and the socket.
+- To get a secret without a cookie, send `X-Kicksnap-Auth: bearer` on the call that signs a device in
+  (`POST /devices/new`, the `GET /link/{code}` poll, `POST /passkeys/login/finish`). The response then carries
+  `"token"` and no cookie is set. Store it in the Keychain/Keystore. `POST /auth/logout` with it revokes it.
+
+## Contributing, security, license
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+kicksnap is licensed under the [GNU AGPL-3.0](LICENSE). If you run a modified version as a service, you must offer
+its source to your users.
 
 ## Stack
 

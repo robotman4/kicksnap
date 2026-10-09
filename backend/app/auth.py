@@ -1,6 +1,6 @@
 """
 Passwordless auth. Every browser is a "device" holding a long-lived secret in an
-httpOnly cookie. A new device either starts a fresh account, gets approved by an
+httpOnly cookie (or, for native apps, sent as a bearer token; see api.py). A new device either starts a fresh account, gets approved by an
 already signed-in device (QR / short code), or signs in with a passkey.
 """
 import hashlib
@@ -10,7 +10,7 @@ import secrets
 import time
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from webauthn import (
     generate_authentication_options, generate_registration_options, options_to_json,
@@ -22,17 +22,17 @@ from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
 )
 
+from .api import API, COOKIE, device_token, wants_token
 from .limits import limit
 from .db import db
 
-COOKIE = "ks_device"
 COOKIE_MAX_AGE = 400 * 24 * 3600  # browsers cap at ~400 days; refreshed on use
 LINK_TTL = 300
 SEEN_EVERY = 600  # seconds between "last active" updates per device
 USERNAME_RE = re.compile(r"^[a-z0-9_.]{3,20}$")
 RP_NAME = "kicksnap"
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix=API)
 
 
 def now() -> int:
@@ -65,7 +65,15 @@ def new_device(conn, user_id: int, request: Request, response: Response) -> None
         "INSERT INTO devices (user_id, token_hash, label, created_at, seen_at) VALUES (?, ?, ?, ?, ?)",
         (user_id, _hash(token), _label(request), now(), now()),
     )
-    _set_cookie(response, request, token)
+    request.state.token = token
+    if not wants_token(request):
+        _set_cookie(response, request, token)
+
+
+def issued(request: Request) -> dict:
+    """Hands the new device secret back in the body, only to clients that asked for it."""
+    token = getattr(request.state, "token", None)
+    return {"token": token} if token and wants_token(request) else {}
 
 
 def user_for_token(token: str | None):
@@ -83,7 +91,7 @@ def user_for_token(token: str | None):
         return row
 
 
-def any_user(ks_device: str | None = Cookie(default=None)):
+def any_user(ks_device: str | None = Depends(device_token)):
     user = user_for_token(ks_device)
     if not user:
         raise HTTPException(401, "not signed in")
@@ -94,7 +102,7 @@ def suspended(user) -> bool:
     return bool(user["suspended_at"]) and (user["suspended_until"] is None or user["suspended_until"] > now())
 
 
-def current_user(ks_device: str | None = Cookie(default=None)):
+def current_user(ks_device: str | None = Depends(device_token)):
     """Signed in, has picked a username, and isn't suspended."""
     user = any_user(ks_device)
     if not user["username"]:
@@ -122,7 +130,7 @@ def start_fresh(request: Request, response: Response):
     with db() as conn:
         cur = conn.execute("INSERT INTO users (created_at) VALUES (?)", (now(),))
         new_device(conn, cur.lastrowid, request, response)
-    return {"username": None, "color": "#C6FF3D"}
+    return {"username": None, "color": "#C6FF3D", **issued(request)}
 
 
 class Name(BaseModel):
@@ -130,7 +138,7 @@ class Name(BaseModel):
 
 
 @router.post("/me/name", dependencies=[Depends(limit("name", 20, 60))])
-def pick_name(body: Name, ks_device: str | None = Cookie(default=None)):
+def pick_name(body: Name, ks_device: str | None = Depends(device_token)):
     user = any_user(ks_device)
     name = body.username.strip().lower()
     if not USERNAME_RE.match(name):
@@ -154,7 +162,7 @@ def name_free(name: str):
 
 
 @router.get("/me")
-def me(ks_device: str | None = Cookie(default=None)):
+def me(ks_device: str | None = Depends(device_token)):
     """Returns the user even before a name is picked, so the client knows where to go."""
     user = any_user(ks_device)
     out = {**public(user), "admin": bool(user["is_admin"])}
@@ -164,7 +172,7 @@ def me(ks_device: str | None = Cookie(default=None)):
 
 
 @router.post("/auth/logout")
-def logout(response: Response, ks_device: str | None = Cookie(default=None)):
+def logout(response: Response, ks_device: str | None = Depends(device_token)):
     if ks_device:
         with db() as conn:
             conn.execute("DELETE FROM devices WHERE token_hash = ?", (_hash(ks_device),))
@@ -173,7 +181,7 @@ def logout(response: Response, ks_device: str | None = Cookie(default=None)):
 
 
 @router.get("/devices")
-def devices(ks_device: str | None = Cookie(default=None)):
+def devices(ks_device: str | None = Depends(device_token)):
     user = any_user(ks_device)
     with db() as conn:
         rows = conn.execute(
@@ -187,7 +195,7 @@ def devices(ks_device: str | None = Cookie(default=None)):
 
 
 @router.delete("/devices/{device_id}")
-def remove_device(device_id: int, ks_device: str | None = Cookie(default=None)):
+def remove_device(device_id: int, ks_device: str | None = Depends(device_token)):
     user = any_user(ks_device)
     with db() as conn:
         conn.execute("DELETE FROM devices WHERE id = ? AND user_id = ?", (device_id, user["id"]))
@@ -228,11 +236,11 @@ def link_poll(code: str, secret: str, request: Request, response: Response):
     with db() as conn:
         new_device(conn, link["user_id"], request, response)
         user = conn.execute("SELECT * FROM users WHERE id = ?", (link["user_id"],)).fetchone()
-    return {"approved": True, "user": public(user)}
+    return {"approved": True, "user": public(user), **issued(request)}
 
 
 @router.post("/link/{code}/approve", dependencies=[Depends(limit("approve", 10, 60))])
-def link_approve(code: str, ks_device: str | None = Cookie(default=None)):
+def link_approve(code: str, ks_device: str | None = Depends(device_token)):
     user = current_user(ks_device)
     _prune()
     link = _links.get(code.strip().upper().removeprefix("KICKSNAP-LINK:"))
@@ -262,7 +270,7 @@ def _stash(challenge: bytes, user_id: int | None) -> str:
 
 
 @router.post("/passkeys/register/begin", dependencies=[Depends(limit("passkey-reg", 10, 60))])
-def passkey_register_begin(request: Request, ks_device: str | None = Cookie(default=None)):
+def passkey_register_begin(request: Request, ks_device: str | None = Depends(device_token)):
     user = current_user(ks_device)
     rp_id, _ = _rp(request)
     with db() as conn:
@@ -287,7 +295,7 @@ class Finish(BaseModel):
 
 
 @router.post("/passkeys/register/finish")
-def passkey_register_finish(body: Finish, request: Request, ks_device: str | None = Cookie(default=None)):
+def passkey_register_finish(body: Finish, request: Request, ks_device: str | None = Depends(device_token)):
     user = current_user(ks_device)
     stashed = _challenges.pop(body.challenge_id, None)
     if not stashed or stashed[2] != user["id"]:
@@ -335,4 +343,4 @@ def passkey_login_finish(body: Finish, request: Request, response: Response):
         conn.execute("UPDATE passkeys SET sign_count = ? WHERE id = ?", (v.new_sign_count, key["id"]))
         new_device(conn, key["user_id"], request, response)
         user = conn.execute("SELECT * FROM users WHERE id = ?", (key["user_id"],)).fetchone()
-    return public(user)
+    return {**public(user), **issued(request)}

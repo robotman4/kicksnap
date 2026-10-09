@@ -45,6 +45,7 @@ export class ApiError extends Error {
 }
 
 // Auth is an httpOnly device cookie, so there's no token handling here at all.
+// (Native apps send the same secret as a bearer token; the web app never sees it.)
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
@@ -60,39 +61,39 @@ const json = (body: unknown) => JSON.stringify(body);
 const post = <T>(path: string, body?: unknown) => call<T>(path, { method: "POST", body: body === undefined ? undefined : json(body) });
 
 export const api = {
-  me: () => call<User>("/api/me"),
-  startFresh: () => post<User>("/api/devices/new"),
-  nameFree: (name: string) => call<{ free: boolean; valid: boolean }>(`/api/names/${encodeURIComponent(name)}`),
-  pickName: (username: string) => post<User>("/api/me/name", { username }),
-  logout: () => post("/api/auth/logout"),
-  setColor: (color: string) => call<User>("/api/me", { method: "PATCH", body: json({ color }) }),
+  me: () => call<User>("/api/v1/me"),
+  startFresh: () => post<User>("/api/v1/devices/new"),
+  nameFree: (name: string) => call<{ free: boolean; valid: boolean }>(`/api/v1/names/${encodeURIComponent(name)}`),
+  pickName: (username: string) => post<User>("/api/v1/me/name", { username }),
+  logout: () => post("/api/v1/auth/logout"),
+  setColor: (color: string) => call<User>("/api/v1/me", { method: "PATCH", body: json({ color }) }),
 
-  linkStart: () => post<{ code: string; secret: string; expires_in: number }>("/api/link/start"),
+  linkStart: () => post<{ code: string; secret: string; expires_in: number }>("/api/v1/link/start"),
   linkPoll: (code: string, secret: string) =>
-    call<{ approved: boolean; user?: User }>(`/api/link/${code}?secret=${encodeURIComponent(secret)}`),
-  linkApprove: (code: string) => post(`/api/link/${encodeURIComponent(code)}/approve`),
-  devices: () => call<{ devices: Device[]; passkeys: number }>("/api/devices"),
-  removeDevice: (id: number) => call(`/api/devices/${id}`, { method: "DELETE" }),
+    call<{ approved: boolean; user?: User }>(`/api/v1/link/${code}?secret=${encodeURIComponent(secret)}`),
+  linkApprove: (code: string) => post(`/api/v1/link/${encodeURIComponent(code)}/approve`),
+  devices: () => call<{ devices: Device[]; passkeys: number }>("/api/v1/devices"),
+  removeDevice: (id: number) => call(`/api/v1/devices/${id}`, { method: "DELETE" }),
 
-  passkeyRegisterBegin: () => post<{ challenge_id: string; options: string }>("/api/passkeys/register/begin"),
+  passkeyRegisterBegin: () => post<{ challenge_id: string; options: string }>("/api/v1/passkeys/register/begin"),
   passkeyRegisterFinish: (challenge_id: string, credential: unknown) =>
-    post("/api/passkeys/register/finish", { challenge_id, credential }),
-  passkeyLoginBegin: () => post<{ challenge_id: string; options: string }>("/api/passkeys/login/begin"),
+    post("/api/v1/passkeys/register/finish", { challenge_id, credential }),
+  passkeyLoginBegin: () => post<{ challenge_id: string; options: string }>("/api/v1/passkeys/login/begin"),
   passkeyLoginFinish: (challenge_id: string, credential: unknown) =>
-    post<User>("/api/passkeys/login/finish", { challenge_id, credential }),
+    post<User>("/api/v1/passkeys/login/finish", { challenge_id, credential }),
 
-  pushKey: () => call<{ key: string }>("/api/push/key"),
-  pushSubscribe: (sub: PushSubscriptionJSON) => post("/api/push/subscribe", sub),
-  pushUnsubscribe: (endpoint: string) => post("/api/push/unsubscribe", { endpoint }),
+  pushKey: () => call<{ key: string }>("/api/v1/push/key"),
+  pushSubscribe: (sub: PushSubscriptionJSON) => post("/api/v1/push/subscribe", sub),
+  pushUnsubscribe: (endpoint: string) => post("/api/v1/push/unsubscribe", { endpoint }),
 
-  friends: () => call<FriendLists>("/api/friends"),
-  addFriend: (username: string) => post<{ username: string; status: "friends" | "requested" }>("/api/friends", { username }),
-  removeFriend: (username: string) => call(`/api/friends/${encodeURIComponent(username)}`, { method: "DELETE" }),
-  blocks: () => call<Friend[]>("/api/blocks"),
-  block: (username: string) => post("/api/blocks", { username }),
-  unblock: (username: string) => call(`/api/blocks/${encodeURIComponent(username)}`, { method: "DELETE" }),
-  deleteAccount: (username: string) => call("/api/me", { method: "DELETE", body: json({ username }) }),
-  chats: () => call<Chat[]>("/api/chats"),
+  friends: () => call<FriendLists>("/api/v1/friends"),
+  addFriend: (username: string) => post<{ username: string; status: "friends" | "requested" }>("/api/v1/friends", { username }),
+  removeFriend: (username: string) => call(`/api/v1/friends/${encodeURIComponent(username)}`, { method: "DELETE" }),
+  blocks: () => call<Friend[]>("/api/v1/blocks"),
+  block: (username: string) => post("/api/v1/blocks", { username }),
+  unblock: (username: string) => call(`/api/v1/blocks/${encodeURIComponent(username)}`, { method: "DELETE" }),
+  deleteAccount: (username: string) => call("/api/v1/me", { method: "DELETE", body: json({ username }) }),
+  chats: () => call<Chat[]>("/api/v1/chats"),
   report: (username: string, reason: Reason, note: string, block: boolean, file?: Blob | null) => {
     const form = new FormData();
     form.append("username", username);
@@ -100,20 +101,20 @@ export const api = {
     form.append("note", note);
     form.append("block", String(block));
     if (file) form.append("file", file, file.type.startsWith("video") ? "snap.webm" : "snap.jpg");
-    return call("/api/reports", { method: "POST", body: form });
+    return call("/api/v1/reports", { method: "POST", body: form });
   },
 
   admin: {
-    reports: () => call<AdminReport[]>("/api/admin/reports"),
-    dismiss: (id: number) => post(`/api/admin/reports/${id}/dismiss`),
-    suspend: (name: string, days: number | null) => post(`/api/admin/users/${encodeURIComponent(name)}/suspend`, { days }),
-    unsuspend: (name: string) => post(`/api/admin/users/${encodeURIComponent(name)}/unsuspend`),
-    remove: (name: string, reserve: boolean) => post(`/api/admin/users/${encodeURIComponent(name)}/delete`, { reserve }),
-    users: (q: string) => call<AdminUser[]>(`/api/admin/users?q=${encodeURIComponent(q)}`),
-    reserved: () => call<Reserved[]>("/api/admin/reserved"),
-    reserve: (name: string, reason: string) => post("/api/admin/reserved", { name, reason }),
-    release: (name: string) => call(`/api/admin/reserved/${encodeURIComponent(name)}`, { method: "DELETE" }),
-    log: () => call<{ admin: string; action: string; target: string; detail: string; at: number }[]>("/api/admin/log"),
+    reports: () => call<AdminReport[]>("/api/v1/admin/reports"),
+    dismiss: (id: number) => post(`/api/v1/admin/reports/${id}/dismiss`),
+    suspend: (name: string, days: number | null) => post(`/api/v1/admin/users/${encodeURIComponent(name)}/suspend`, { days }),
+    unsuspend: (name: string) => post(`/api/v1/admin/users/${encodeURIComponent(name)}/unsuspend`),
+    remove: (name: string, reserve: boolean) => post(`/api/v1/admin/users/${encodeURIComponent(name)}/delete`, { reserve }),
+    users: (q: string) => call<AdminUser[]>(`/api/v1/admin/users?q=${encodeURIComponent(q)}`),
+    reserved: () => call<Reserved[]>("/api/v1/admin/reserved"),
+    reserve: (name: string, reason: string) => post("/api/v1/admin/reserved", { name, reason }),
+    release: (name: string) => call(`/api/v1/admin/reserved/${encodeURIComponent(name)}`, { method: "DELETE" }),
+    log: () => call<{ admin: string; action: string; target: string; detail: string; at: number }[]>("/api/v1/admin/log"),
   },
   /** `to` holds chat keys: friends and groups in one list. */
   send: (blob: Blob, overlay: Blob | null, to: string[], seconds: number) => {
@@ -123,24 +124,24 @@ export const api = {
     form.append("to", to.filter((k) => k.startsWith("u:")).map((k) => k.slice(2)).join(","));
     form.append("groups", to.filter((k) => k.startsWith("g:")).map((k) => k.slice(2)).join(","));
     form.append("seconds", String(seconds));
-    return call<{ sent_to: string[] }>("/api/snaps", { method: "POST", body: form });
+    return call<{ sent_to: string[] }>("/api/v1/snaps", { method: "POST", body: form });
   },
-  media: (id: string) => call<Blob>(`/api/snaps/${id}/media`),
-  overlay: (id: string) => call<Blob>(`/api/snaps/${id}/overlay`),
-  open: (id: string) => post(`/api/snaps/${id}/open`),
+  media: (id: string) => call<Blob>(`/api/v1/snaps/${id}/media`),
+  overlay: (id: string) => call<Blob>(`/api/v1/snaps/${id}/overlay`),
+  open: (id: string) => post(`/api/v1/snaps/${id}/open`),
 
-  messages: (key: string) => call<{ messages: Message[]; seen_at: number }>(`/api/chats/${encodeURIComponent(key)}/messages`),
-  say: (key: string, body: string) => post(`/api/chats/${encodeURIComponent(key)}/messages`, { body }),
-  read: (key: string) => post(`/api/chats/${encodeURIComponent(key)}/read`),
+  messages: (key: string) => call<{ messages: Message[]; seen_at: number }>(`/api/v1/chats/${encodeURIComponent(key)}/messages`),
+  say: (key: string, body: string) => post(`/api/v1/chats/${encodeURIComponent(key)}/messages`, { body }),
+  read: (key: string) => post(`/api/v1/chats/${encodeURIComponent(key)}/read`),
 
-  newGroup: (name: string, members: string[]) => post<Group>("/api/groups", { name, members }),
-  group: (id: number) => call<Group>(`/api/groups/${id}`),
+  newGroup: (name: string, members: string[]) => post<Group>("/api/v1/groups", { name, members }),
+  group: (id: number) => call<Group>(`/api/v1/groups/${id}`),
   updateGroup: (id: number, patch: { name?: string; invite_mode?: InviteMode; admin?: string }) =>
-    call<Group>(`/api/groups/${id}`, { method: "PATCH", body: json(patch) }),
-  invite: (id: number, usernames: string[]) => post<Group>(`/api/groups/${id}/members`, { usernames }),
-  joinGroup: (code: string) => post<Group>("/api/groups/join", { code }),
-  removeMember: (id: number, username: string) => call(`/api/groups/${id}/members/${encodeURIComponent(username)}`, { method: "DELETE" }),
-  closeGroup: (id: number) => call(`/api/groups/${id}`, { method: "DELETE" }),
+    call<Group>(`/api/v1/groups/${id}`, { method: "PATCH", body: json(patch) }),
+  invite: (id: number, usernames: string[]) => post<Group>(`/api/v1/groups/${id}/members`, { usernames }),
+  joinGroup: (code: string) => post<Group>("/api/v1/groups/join", { code }),
+  removeMember: (id: number, username: string) => call(`/api/v1/groups/${id}/members/${encodeURIComponent(username)}`, { method: "DELETE" }),
+  closeGroup: (id: number) => call(`/api/v1/groups/${id}`, { method: "DELETE" }),
 };
 
 /** Characters as people count them: one emoji is one. */
@@ -170,7 +171,7 @@ export function live(onConnect: () => void, onEvent: (e: LiveEvent) => void): ()
   const connect = () => {
     if (closed) return;
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    ws = new WebSocket(`${proto}://${location.host}/ws`);
+    ws = new WebSocket(`${proto}://${location.host}/api/v1/ws`);
     ws.onopen = () => {
       // anything that happened while we were disconnected
       if (retry > 1000 || reconnects++) onConnect();

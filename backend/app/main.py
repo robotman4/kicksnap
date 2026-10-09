@@ -14,7 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import db as store
-from .auth import COOKIE, current_user, public, router as auth_router, suspended, user_for_token
+from .api import API, VERSION, Unversioned, device_token
+from .auth import current_user, public, router as auth_router, suspended, user_for_token
 from .limits import limit
 from .db import db
 from .chat import are_friends, blocked, member_ids, router as chat_router
@@ -29,7 +30,8 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 STATIC_DIR = Path(os.getenv("STATIC_DIR", "../frontend/dist"))
 VIEW_SECONDS = {0, 3, 5, 10}
 
-app = FastAPI(title="Kicksnap", docs_url="/api/docs", openapi_url="/api/openapi.json")
+app = FastAPI(title="Kicksnap", version=str(VERSION), docs_url=f"{API}/docs", openapi_url=f"{API}/openapi.json")
+app.add_middleware(Unversioned)
 app.include_router(auth_router)
 app.include_router(push_router)
 app.include_router(chat_router)
@@ -45,7 +47,7 @@ class Profile(BaseModel):
     color: str
 
 
-@app.patch("/api/me")
+@app.patch(API + "/me")
 def update_me(body: Profile, user=Depends(current_user)):
     if not re.match(r"^#[0-9a-fA-F]{6}$", body.color):
         raise HTTPException(400, "bad color")
@@ -56,9 +58,9 @@ def update_me(body: Profile, user=Depends(current_user)):
 
 # --- realtime ---------------------------------------------------------------
 
-@app.websocket("/ws")
+@app.websocket(API + "/ws")
 async def socket(ws: WebSocket):
-    user = user_for_token(ws.cookies.get(COOKIE))
+    user = user_for_token(device_token(ws))
     if not user or not user["username"] or suspended(user):
         await ws.close(code=4401)
         return
@@ -75,7 +77,7 @@ async def socket(ws: WebSocket):
 
 # --- friends ----------------------------------------------------------------
 
-@app.get("/api/friends")
+@app.get(API + "/friends")
 def friends(user=Depends(current_user)):
     with db() as conn:
         rows = conn.execute(
@@ -101,7 +103,7 @@ class AddFriend(BaseModel):
     username: str
 
 
-@app.post("/api/friends", dependencies=[Depends(limit("friend", 30, 60))])
+@app.post(API + "/friends", dependencies=[Depends(limit("friend", 30, 60))])
 async def add_friend(body: AddFriend, user=Depends(current_user)):
     """Send a request, or accept one if they already added you."""
     name = body.username.strip().lower().removeprefix("kicksnap:")
@@ -124,7 +126,7 @@ async def add_friend(body: AddFriend, user=Depends(current_user)):
     return {"username": other["username"], "status": "friends" if mutual else "requested"}
 
 
-@app.delete("/api/friends/{username}")
+@app.delete(API + "/friends/{username}")
 async def remove_friend(username: str, user=Depends(current_user)):
     with db() as conn:
         other = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
@@ -140,7 +142,7 @@ async def remove_friend(username: str, user=Depends(current_user)):
 
 # --- snaps ------------------------------------------------------------------
 
-@app.post("/api/snaps", dependencies=[Depends(limit("snap", 30, 60))])
+@app.post(API + "/snaps", dependencies=[Depends(limit("snap", 30, 60))])
 async def send_snap(
     file: UploadFile = File(...),
     overlay: UploadFile | None = File(None),
@@ -225,14 +227,14 @@ def _delivery(conn, snap_id: str, user_id: int):
     return row
 
 
-@app.get("/api/snaps/{snap_id}/media")
+@app.get(API + "/snaps/{snap_id}/media")
 def snap_media(snap_id: str, user=Depends(current_user)):
     with db() as conn:
         row = _delivery(conn, snap_id, user["id"])
     return FileResponse(media_path(snap_id), media_type=row["mime"], headers={"Cache-Control": "no-store"})
 
 
-@app.get("/api/snaps/{snap_id}/overlay")
+@app.get(API + "/snaps/{snap_id}/overlay")
 def snap_overlay(snap_id: str, user=Depends(current_user)):
     with db() as conn:
         _delivery(conn, snap_id, user["id"])
@@ -241,7 +243,7 @@ def snap_overlay(snap_id: str, user=Depends(current_user)):
     return FileResponse(overlay_path(snap_id), media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
-@app.post("/api/snaps/{snap_id}/open")
+@app.post(API + "/snaps/{snap_id}/open")
 async def open_snap(snap_id: str, user=Depends(current_user)):
     """Burn it for this viewer. Media is deleted once every recipient has opened it."""
     with db() as conn:
@@ -287,9 +289,9 @@ async def startup():
     asyncio.create_task(burn_loop())
 
 
-@app.get("/api/health")
+@app.get(API + "/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "api": API}
 
 
 # --- frontend ---------------------------------------------------------------

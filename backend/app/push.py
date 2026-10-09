@@ -20,14 +20,15 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from fastapi import APIRouter, Cookie, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from .api import API, device_token
 from .auth import current_user, now
 from .db import DATA_DIR, db
 
 log = logging.getLogger("kicksnap.push")
-router = APIRouter(prefix="/api/push")
+router = APIRouter(prefix=f"{API}/push")
 
 VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "https://github.com/robotman4/kicksnap")
 # Only ever POST to real push services; endpoints come from the browser, so this
@@ -157,7 +158,7 @@ class Subscription(BaseModel):
 
 
 @router.post("/subscribe")
-def subscribe(body: Subscription, ks_device: str | None = Cookie(default=None)):
+def subscribe(body: Subscription, ks_device: str | None = Depends(device_token)):
     user = current_user(ks_device)
     if not allowed(body.endpoint):
         raise HTTPException(400, "unknown push service")
@@ -177,7 +178,7 @@ class Unsubscribe(BaseModel):
 
 
 @router.post("/unsubscribe")
-def unsubscribe(body: Unsubscribe, ks_device: str | None = Cookie(default=None)):
+def unsubscribe(body: Unsubscribe, ks_device: str | None = Depends(device_token)):
     user = current_user(ks_device)
     with db() as conn:
         conn.execute("DELETE FROM push_subs WHERE endpoint = ? AND user_id = ?", (body.endpoint, user["id"]))

@@ -1,19 +1,20 @@
 """Blocking people and deleting your account."""
 import os
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
-from .auth import COOKIE, any_user, current_user, now
+from .api import API, COOKIE, device_token
+from .auth import any_user, current_user, now
 from .limits import limit
 from .db import db
 from .hub import hub
 from .media import burn
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix=API)
 
 
-def any_named_user(ks_device: str | None = Cookie(default=None)):
+def any_named_user(ks_device: str | None = Depends(device_token)):
     """Signed in with a name; suspended people can still delete their account."""
     user = any_user(ks_device)
     if not user["username"]:

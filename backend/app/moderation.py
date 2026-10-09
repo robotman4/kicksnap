@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from .api import API
 from .auth import USERNAME_RE, current_user, now, suspended
 from .chat import are_friends
 from .db import MEDIA_DIR, db
@@ -21,7 +22,7 @@ from .media import save_upload
 from .push import notify
 from .safety import tell_gone, wipe
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix=API)
 
 REASONS = {"spam", "nudity", "harassment", "violence", "other"}
 REPORT_DIR = MEDIA_DIR / "reports"
@@ -140,7 +141,7 @@ def open_reports(admin=Depends(admin_user)):
             "reporter": r["reporter_name"],
             "reason": r["reason"],
             "note": r["note"],
-            "media": f"/api/admin/reports/{r['id']}/media" if r["media"] else None,
+            "media": f"{API}/admin/reports/{r['id']}/media" if r["media"] else None,
             "media_kind": ("video" if (r["media_mime"] or "").startswith("video/") else "photo") if r["media"] else None,
             "was_friend": bool(r["was_friend"]),
             "friend_reporters": r["friend_reporters"],
