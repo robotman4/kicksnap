@@ -2,7 +2,7 @@ import { ChevronLeft, Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Avatar } from "../components/Avatar";
-import { AdminReport, AdminUser, api, Reserved } from "../lib/api";
+import { AdminAppeal, AdminReport, AdminUser, api, Reserved } from "../lib/api";
 import { ago, buzz } from "../lib/feel";
 
 type Tab = "reports" | "users" | "names" | "log";
@@ -79,10 +79,52 @@ function Actions({ name, suspended, onDone, toast, onDismiss }: { name: string; 
   );
 }
 
+/** A suspended person asking to be let back in. */
+function Appeal({ a, onDone, toast }: { a: AdminAppeal; onDone: () => void; toast: (t: string) => void }) {
+  const [reply, setReply] = useState("");
+  const decide = (lift: boolean) =>
+    api.admin.decide(a.id, lift, reply).then(
+      () => (buzz(10), toast(lift ? `@${a.username} is back` : `kept @${a.username} suspended`), onDone()),
+      (e) => toast(e.message)
+    );
+  return (
+    <div className="rounded-[2rem] bg-sky-400/10 p-5">
+      <div className="flex items-center gap-3">
+        <p className="flex-1 truncate text-xl font-black">@{a.username}</p>
+        <span className="text-sm text-white/40">{ago(a.at)}</span>
+      </div>
+      <p className="mt-1 font-bold text-sky-300">appeal</p>
+      <p className="text-sm text-white/50">
+        suspended {a.until ? `until ${new Date(a.until * 1000).toLocaleDateString()}` : "until lifted"}
+        {a.reason ? ` for ${a.reason}` : ""}
+      </p>
+      <p className="mt-2 whitespace-pre-wrap break-words rounded-2xl bg-black/40 px-4 py-2 text-white/80">“{a.body}”</p>
+      <input
+        value={reply}
+        onChange={(e) => setReply(e.target.value.slice(0, 500))}
+        placeholder="short answer they'll see (optional)"
+        className="mt-3 w-full rounded-full bg-white/10 px-5 py-3 font-semibold outline-none placeholder:text-white/30"
+        style={{ userSelect: "text", WebkitUserSelect: "text" }}
+      />
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button onClick={() => decide(true)} className="rounded-full bg-accent px-4 py-2.5 font-black text-black active:scale-95">
+          lift suspension
+        </button>
+        <button onClick={() => decide(false)} className="rounded-full bg-white/10 px-4 py-2.5 font-bold active:scale-95">
+          keep suspended
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Reports({ tick, toast }: { tick: number; toast: (t: string) => void }) {
   const [list, setList] = useState<AdminReport[] | null>(null);
-  const [media, setMedia] = useState<Record<number, string>>({});
-  const load = () => api.admin.reports().then(setList, (e) => toast(e.message));
+  const [appeals, setAppeals] = useState<AdminAppeal[]>([]);
+  // evidence url -> blob url
+  const [media, setMedia] = useState<Record<string, string>>({});
+  const load = () =>
+    Promise.all([api.admin.appeals().then(setAppeals), api.admin.reports().then(setList)]).catch((e) => toast(e.message));
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -91,22 +133,27 @@ function Reports({ tick, toast }: { tick: number; toast: (t: string) => void }) 
   useEffect(() => {
     const urls: string[] = [];
     list?.forEach((r) => {
-      if (r.media && !media[r.id])
-        fetch(r.media, { credentials: "same-origin" })
-          .then((res) => res.blob())
-          .then((b) => {
-            const u = URL.createObjectURL(b);
-            urls.push(u);
-            setMedia((m) => ({ ...m, [r.id]: u }));
-          });
+      [r.media, ...r.shots].forEach((src) => {
+        if (src && !media[src])
+          fetch(src, { credentials: "same-origin" })
+            .then((res) => res.blob())
+            .then((b) => {
+              const u = URL.createObjectURL(b);
+              urls.push(u);
+              setMedia((m) => ({ ...m, [src]: u }));
+            });
+      });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list]);
 
   if (!list) return null;
-  if (!list.length) return <p className="mt-20 text-center text-2xl font-black text-white/30">nothing to look at 🎉</p>;
+  if (!list.length && !appeals.length) return <p className="mt-20 text-center text-2xl font-black text-white/30">nothing to look at 🎉</p>;
   return (
     <div className="flex flex-col gap-4">
+      {appeals.map((a) => (
+        <Appeal key={`a${a.id}`} a={a} onDone={load} toast={toast} />
+      ))}
       {list.map((r) => (
         <div key={r.id} className="rounded-[2rem] bg-white/5 p-5">
           <div className="flex items-center gap-3">
@@ -122,12 +169,37 @@ function Reports({ tick, toast }: { tick: number; toast: (t: string) => void }) 
             {r.was_friend ? " (a friend of theirs)" : ""} · {r.friend_reporters} friend{r.friend_reporters === 1 ? "" : "s"} reported them
           </p>
           {r.note && <p className="mt-2 rounded-2xl bg-black/40 px-4 py-2 text-white/80">“{r.note}”</p>}
-          {r.media && media[r.id] && (
+          {r.media && media[r.media] && (
             <div className="mt-3 overflow-hidden rounded-2xl bg-black">
               {r.media_kind === "video" ? (
-                <video src={media[r.id]} controls playsInline className="max-h-80 w-full object-contain" />
+                <video src={media[r.media]} controls playsInline className="max-h-80 w-full object-contain" />
               ) : (
-                <img src={media[r.id]} alt="reported snap" className="max-h-80 w-full object-contain" />
+                <img src={media[r.media]} alt="reported snap" className="max-h-80 w-full object-contain" />
+              )}
+            </div>
+          )}
+          {r.texts.length > 0 && (
+            <div className="mt-3 flex flex-col gap-1.5">
+              {r.texts.map((t, i) => (
+                <div key={i} className="flex flex-col items-start">
+                  <p className="max-w-[90%] whitespace-pre-wrap break-words rounded-3xl bg-white/10 px-4 py-2 font-semibold">{t.body}</p>
+                  <span className="ml-3 mt-0.5 text-xs text-white/40">
+                    {t.group ? `in ${t.group}` : "to them directly"} · {ago(t.at)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {r.shots.length > 0 && (
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {r.shots.map((src) =>
+                media[src] ? (
+                  <a key={src} href={media[src]} target="_blank" rel="noreferrer" className="overflow-hidden rounded-xl bg-black">
+                    <img src={media[src]} alt="screenshot" className="aspect-[9/16] w-full object-cover" />
+                  </a>
+                ) : (
+                  <div key={src} className="aspect-[9/16] rounded-xl bg-white/5" />
+                )
               )}
             </div>
           )}

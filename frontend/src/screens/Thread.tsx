@@ -28,7 +28,12 @@ export function Thread({
 }) {
   const [friendMenu, setFriendMenu] = useState(false);
   const [confirmBlock, setConfirmBlock] = useState(false);
-  const [reporting, setReporting] = useState(false);
+  const [reporting, setReporting] = useState<{ name: string; text?: number } | null>(null);
+  // someone else's text you tapped: offers to report it
+  const [tapped, setTapped] = useState<Message | null>(null);
+  // keeps the name on the sheet while it slides away
+  const lastReport = useRef<{ name: string; text?: number }>({ name: chat.key.slice(2) });
+  if (reporting) lastReport.current = reporting;
   const who = chat.key.slice(2);
   const act = (p: Promise<unknown>, done: string) =>
     p.then(
@@ -116,8 +121,9 @@ export function Thread({
                 </span>
               )}
               <p
+                onClick={() => !m.mine && !window.getSelection()?.toString() && setTapped(m)}
                 className={`max-w-[80%] whitespace-pre-wrap break-words rounded-3xl px-4 py-2.5 text-lg font-semibold leading-snug ${
-                  m.mine ? "bg-accent text-black" : "bg-white/10"
+                  m.mine ? "bg-accent text-black" : "bg-white/10 active:bg-white/15"
                 }`}
                 style={{ userSelect: "text", WebkitUserSelect: "text" }}
               >
@@ -182,7 +188,7 @@ export function Thread({
               <Ban size={22} /> {confirmBlock ? "tap again to block" : `block @${who}`}
             </button>
             <button
-              onClick={() => (setFriendMenu(false), setReporting(true))}
+              onClick={() => (setFriendMenu(false), setReporting({ name: who }))}
               className="flex items-center justify-center gap-2 rounded-full py-4 font-bold text-white/50 active:scale-[.98]"
             >
               <Flag size={20} /> report @{who}
@@ -191,18 +197,29 @@ export function Thread({
           </div>
         </Sheet>
       )}
-      {!chat.group && (
-        <ReportSheet
-          open={reporting}
-          username={who}
-          onClose={() => setReporting(false)}
-          onDone={(blocked) => {
-            setReporting(false);
-            if (blocked) onGone();
-          }}
-          toast={toast}
-        />
-      )}
+      <Sheet open={!!tapped} onClose={() => setTapped(null)}>
+        <div className="flex flex-col gap-3 px-6 pb-[max(env(safe-area-inset-bottom),24px)]">
+          <p className="mb-1 line-clamp-3 rounded-3xl bg-white/10 px-4 py-2.5 text-lg font-semibold">{tapped?.body}</p>
+          <button
+            onClick={() => tapped && (setTapped(null), setReporting({ name: tapped.from, text: tapped.id }))}
+            className="flex items-center justify-center gap-2 rounded-full bg-red-500/15 py-5 text-lg font-bold text-red-400 active:scale-[.98]"
+          >
+            <Flag size={22} /> report this text from @{tapped?.from}
+          </button>
+        </div>
+      </Sheet>
+      <ReportSheet
+        open={!!reporting}
+        username={lastReport.current.name}
+        text={lastReport.current.text}
+        onClose={() => setReporting(null)}
+        onDone={(blocked) => {
+          setReporting(null);
+          // blocking someone in a group keeps you in the group
+          if (blocked && !chat.group) onGone();
+        }}
+        toast={toast}
+      />
     </div>
   );
 }

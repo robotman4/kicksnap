@@ -31,10 +31,24 @@ export type AdminReport = {
   note: string;
   media: string | null;
   media_kind: "photo" | "video" | null;
+  /** their texts, copied when reported; group is null for direct texts */
+  texts: { body: string; at: number; group: string | null }[];
+  shots: string[];
   was_friend: boolean;
   friend_reporters: number;
   at: number;
 };
+export type Suspension =
+  | { suspended: false }
+  | {
+      suspended: true;
+      /** 0 = until an admin lifts it */
+      until: number;
+      reason: string;
+      appeal: { body: string; at: number; outcome: "lifted" | "rejected" | null; reply: string } | null;
+    };
+export type AdminAppeal = { id: number; username: string; body: string; at: number; until: number; reason: string };
+export type TheirText = { id: number; body: string; at: number; group: string | null };
 export type AdminUser = { username: string; color: string; created_at: number; devices: number; admin: boolean; suspended: boolean; suspended_until: number | null; open_reports: number };
 export type Reserved = { name: string; reason: string; by: string; at: number; expires_at: number | null };
 
@@ -94,18 +108,32 @@ export const api = {
   unblock: (username: string) => call(`/api/v1/blocks/${encodeURIComponent(username)}`, { method: "DELETE" }),
   deleteAccount: (username: string) => call("/api/v1/me", { method: "DELETE", body: json({ username }) }),
   chats: () => call<Chat[]>("/api/v1/chats"),
-  report: (username: string, reason: Reason, note: string, block: boolean, file?: Blob | null) => {
+  suspension: () => call<Suspension>("/api/v1/appeal"),
+  appeal: (body: string) => post("/api/v1/appeal", { body }),
+  reportTexts: (username: string) => call<TheirText[]>(`/api/v1/reports/texts/${encodeURIComponent(username)}`),
+  report: (
+    username: string,
+    reason: Reason,
+    note: string,
+    block: boolean,
+    proof: { snap?: Blob | null; texts?: number[]; shots?: File[] } = {}
+  ) => {
     const form = new FormData();
     form.append("username", username);
     form.append("reason", reason);
     form.append("note", note);
     form.append("block", String(block));
-    if (file) form.append("file", file, file.type.startsWith("video") ? "snap.webm" : "snap.jpg");
+    const { snap, texts = [], shots = [] } = proof;
+    if (snap) form.append("file", snap, snap.type.startsWith("video") ? "snap.webm" : "snap.jpg");
+    texts.forEach((id) => form.append("message_ids", String(id)));
+    shots.forEach((f) => form.append("shots", f, f.name || "screenshot.jpg"));
     return call("/api/v1/reports", { method: "POST", body: form });
   },
 
   admin: {
     reports: () => call<AdminReport[]>("/api/v1/admin/reports"),
+    appeals: () => call<AdminAppeal[]>("/api/v1/admin/appeals"),
+    decide: (id: number, lift: boolean, reply: string) => post(`/api/v1/admin/appeals/${id}`, { lift, reply }),
     dismiss: (id: number) => post(`/api/v1/admin/reports/${id}/dismiss`),
     suspend: (name: string, days: number | null) => post(`/api/v1/admin/users/${encodeURIComponent(name)}/suspend`, { days }),
     unsuspend: (name: string) => post(`/api/v1/admin/users/${encodeURIComponent(name)}/unsuspend`),

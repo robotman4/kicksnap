@@ -167,7 +167,7 @@ export function Settings({
           </div>
 
           <button
-            onClick={() => (buzz(8), reloadApp())}
+            onClick={() => (buzz(8), reloadApp(fresh))}
             className={`mt-8 flex w-full items-center justify-center gap-2 rounded-full py-5 text-lg font-bold active:scale-[.98] ${
               fresh ? "bg-accent text-black" : "bg-white/5 text-white/60"
             }`}

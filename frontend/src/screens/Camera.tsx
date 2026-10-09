@@ -190,11 +190,16 @@ export function Camera({
     setFocus(track, "single-shot", { x, y }).then((ok) => ok && setTimeout(() => setFocus(track, "continuous"), 2500));
   };
 
+  // finger is on the shutter (set on down, cleared on up/cancel)
+  const holding = useRef(false);
+
   const startRecording = async () => {
     if (!stream.current) return;
     const tracks = [...stream.current.getVideoTracks()];
     // Mic is only requested the first time someone actually records.
     const mic = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
+    // let go (or left the camera) while the mic was being set up: don't start
+    if (!holding.current || !stream.current) return mic?.getTracks().forEach((t) => t.stop());
     mic?.getAudioTracks().forEach((t) => tracks.push(t));
     const mime = pickMime();
     const rec = new MediaRecorder(new MediaStream(tracks), { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: VIDEO_BPS });
@@ -202,6 +207,11 @@ export function Camera({
     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     rec.onstop = () => {
       mic?.getTracks().forEach((t) => t.stop());
+      // the recorder can also stop on its own (iOS ends it when the camera track ends),
+      // so the button always resets here, not only when the finger lifts
+      if (recorder.current === rec) recorder.current = null;
+      clearTimeout(stopTimer.current);
+      setRecording(false);
       const blob = new Blob(chunks, { type: rec.mimeType || "video/webm" });
       if (blob.size) onCapture({ blob, kind: "video", url: URL.createObjectURL(blob) });
     };
@@ -219,9 +229,20 @@ export function Camera({
     setRecording(false);
   };
 
+  // Leaving the camera (preview, chats, app in background) drops any half-made recording state.
+  useEffect(() => {
+    if (active) return;
+    holding.current = false;
+    clearTimeout(holdTimer.current);
+    holdTimer.current = undefined;
+    endRecording();
+  }, [active]);
+
   const shutterDown = (e: React.PointerEvent) => {
     e.stopPropagation();
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    holding.current = true;
+    clearTimeout(holdTimer.current);
     holdTimer.current = window.setTimeout(() => {
       holdTimer.current = undefined;
       startRecording();
@@ -229,6 +250,8 @@ export function Camera({
   };
 
   const shutterUp = () => {
+    if (!holding.current) return;
+    holding.current = false;
     if (holdTimer.current) {
       clearTimeout(holdTimer.current);
       holdTimer.current = undefined;
