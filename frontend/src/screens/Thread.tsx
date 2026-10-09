@@ -1,6 +1,7 @@
-import { ArrowUp, Camera as CameraIcon, ChevronLeft } from "lucide-react";
+import { ArrowUp, Ban, Camera as CameraIcon, ChevronLeft, UserMinus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
+import { Sheet } from "../components/Sheet";
 import { api, charCount, Chat, clip, MAX_CHARS, Message } from "../lib/api";
 import { buzz } from "../lib/feel";
 import { useVisualViewport } from "../lib/viewport";
@@ -12,13 +13,26 @@ export function Thread({
   onClose,
   onSnap,
   onInfo,
+  onGone,
+  toast,
 }: {
   chat: Chat;
   tick: number;
   onClose: () => void;
   onSnap: () => void;
   onInfo: () => void;
+  /** you unfriended or blocked them */
+  onGone: () => void;
+  toast: (t: string) => void;
 }) {
+  const [friendMenu, setFriendMenu] = useState(false);
+  const [confirmBlock, setConfirmBlock] = useState(false);
+  const who = chat.key.slice(2);
+  const act = (p: Promise<unknown>, done: string) =>
+    p.then(
+      () => (buzz(10), toast(done), setFriendMenu(false), onGone()),
+      (e) => toast((e as Error).message)
+    );
   const [messages, setMessages] = useState<Message[]>([]);
   const [seenAt, setSeenAt] = useState(0);
   const [text, setText] = useState("");
@@ -72,11 +86,14 @@ export function Thread({
         <button onClick={onClose} aria-label="back" className="grid h-12 w-12 place-items-center rounded-full active:bg-white/10">
           <ChevronLeft size={30} strokeWidth={2.75} />
         </button>
-        <button onClick={onInfo} disabled={!chat.group} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+        <button
+          onClick={() => (chat.group ? onInfo() : (setConfirmBlock(false), setFriendMenu(true)))}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
           <Avatar name={chat.name} color={chat.color} size={40} group={chat.group} />
           <div className="min-w-0">
             <p className="truncate text-lg font-black">{chat.name}</p>
-            {chat.group && <p className="text-xs font-semibold text-white/40">tap for group info</p>}
+            <p className="text-xs font-semibold text-white/40">{chat.group ? "tap for group info" : "tap for options"}</p>
           </div>
         </button>
         <button onClick={onSnap} aria-label={`snap ${chat.name}`} className="grid h-12 w-12 place-items-center rounded-full bg-accent text-black active:scale-90">
@@ -142,6 +159,30 @@ export function Thread({
           <ArrowUp size={28} strokeWidth={3} />
         </button>
       </form>
+
+      {!chat.group && (
+        <Sheet open={friendMenu} onClose={() => setFriendMenu(false)}>
+          <div className="flex flex-col gap-3 px-6 pb-[max(env(safe-area-inset-bottom),24px)]">
+            <div className="mb-2 flex items-center gap-4">
+              <Avatar name={chat.name} color={chat.color} size={56} />
+              <h2 className="truncate text-3xl font-black">@{chat.name}</h2>
+            </div>
+            <button
+              onClick={() => act(api.removeFriend(who), `removed @${who}`)}
+              className="flex items-center justify-center gap-2 rounded-full bg-white/10 py-5 text-lg font-bold active:scale-[.98]"
+            >
+              <UserMinus size={22} /> remove friend
+            </button>
+            <button
+              onClick={() => (confirmBlock ? act(api.block(who), `blocked @${who}`) : setConfirmBlock(true))}
+              className="flex items-center justify-center gap-2 rounded-full bg-red-500/15 py-5 text-lg font-bold text-red-400 active:scale-[.98]"
+            >
+              <Ban size={22} /> {confirmBlock ? "tap again to block" : `block @${who}`}
+            </button>
+            <p className="text-center text-sm text-white/40">Blocking unfriends you both and stops them finding you again.</p>
+          </div>
+        </Sheet>
+      )}
     </div>
   );
 }

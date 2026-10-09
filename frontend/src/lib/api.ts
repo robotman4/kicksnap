@@ -69,6 +69,11 @@ export const api = {
 
   friends: () => call<FriendLists>("/api/friends"),
   addFriend: (username: string) => post<{ username: string; status: "friends" | "requested" }>("/api/friends", { username }),
+  removeFriend: (username: string) => call(`/api/friends/${encodeURIComponent(username)}`, { method: "DELETE" }),
+  blocks: () => call<Friend[]>("/api/blocks"),
+  block: (username: string) => post("/api/blocks", { username }),
+  unblock: (username: string) => call(`/api/blocks/${encodeURIComponent(username)}`, { method: "DELETE" }),
+  deleteAccount: (username: string) => call("/api/me", { method: "DELETE", body: json({ username }) }),
   chats: () => call<Chat[]>("/api/chats"),
   /** `to` holds chat keys: friends and groups in one list. */
   send: (blob: Blob, overlay: Blob | null, to: string[], seconds: number) => {

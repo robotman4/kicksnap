@@ -89,6 +89,13 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_direct ON messages(sender_id, to_user, created_at);
 CREATE INDEX IF NOT EXISTS messages_group ON messages(group_id, created_at);
+-- blocking hides both people from each other: no friending, snaps or texts
+CREATE TABLE IF NOT EXISTS blocks (
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  INTEGER NOT NULL,
+    PRIMARY KEY (user_id, blocked_id)
+);
 -- how far each user has read each chat ("u:<user id>" or "g:<group id>")
 CREATE TABLE IF NOT EXISTS reads (
     user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

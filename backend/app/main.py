@@ -16,10 +16,11 @@ from pydantic import BaseModel
 from . import db as store
 from .auth import COOKIE, current_user, public, router as auth_router, user_for_token
 from .db import db
-from .chat import are_friends, member_ids, router as chat_router
+from .chat import are_friends, blocked, member_ids, router as chat_router
 from .hub import hub
 from .media import burn, media_path, overlay_path
 from .push import notify, router as push_router
+from .safety import router as safety_router
 
 SNAP_TTL_HOURS = int(os.getenv("SNAP_TTL_HOURS", "24"))
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
@@ -30,6 +31,7 @@ app = FastAPI(title="Kicksnap", docs_url="/api/docs", openapi_url="/api/openapi.
 app.include_router(auth_router)
 app.include_router(push_router)
 app.include_router(chat_router)
+app.include_router(safety_router)
 
 
 def now() -> int:
@@ -102,7 +104,8 @@ async def add_friend(body: AddFriend, user=Depends(current_user)):
     name = body.username.strip().lower().removeprefix("kicksnap:")
     with db() as conn:
         other = conn.execute("SELECT * FROM users WHERE username = ?", (name,)).fetchone()
-        if not other:
+        # a block looks the same as no such person, from both sides
+        if not other or blocked(conn, user["id"], other["id"]):
             raise HTTPException(404, "no one by that name")
         if other["id"] == user["id"]:
             raise HTTPException(400, "that's you")
@@ -191,7 +194,7 @@ async def send_snap(
             g = conn.execute("SELECT name FROM groups WHERE id = ?", (gid,)).fetchone()
             members = member_ids(conn, gid)
             if g and me in members:
-                others = [{"id": m, "username": None} for m in members if m != me]
+                others = [{"id": m, "username": None} for m in members if m != me and not blocked(conn, me, m)]
                 targets.append((gid, others, g["name"]))
         if not targets:
             burn(snap_id)

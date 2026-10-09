@@ -1,9 +1,9 @@
-import { Bell, BellOff, Check, Fingerprint, LogOut, QrCode, RefreshCw, Smartphone, Sparkles, X } from "lucide-react";
+import { Bell, BellOff, Check, Fingerprint, LogOut, QrCode, RefreshCw, Smartphone, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Scanner } from "../components/Scanner";
 import { Sheet } from "../components/Sheet";
-import { api, Device, User } from "../lib/api";
+import { api, Device, Friend, User } from "../lib/api";
 import { ACCENTS, ago, buzz, onColor, timerLabel, TIMERS } from "../lib/feel";
 import { addPasskey, passkeysSupported } from "../lib/passkey";
 import { disablePush, enablePush, pushState, PushState } from "../lib/push";
@@ -17,6 +17,7 @@ export function Settings({
   onColor: setColor,
   onSeconds,
   onLogout,
+  onDeleted,
   toast,
 }: {
   open: boolean;
@@ -26,8 +27,12 @@ export function Settings({
   onColor: (c: string) => void;
   onSeconds: (s: number) => void;
   onLogout: () => void;
+  onDeleted: () => void;
   toast: (t: string) => void;
 }) {
+  const [blocked, setBlocked] = useState<Friend[]>([]);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
   const [devices, setDevices] = useState<Device[]>([]);
   const [passkeys, setPasskeys] = useState(0);
   const [scanning, setScanning] = useState(false);
@@ -48,7 +53,19 @@ export function Settings({
     load();
     pushState().then(setPush);
     updateAvailable().then(setFresh);
+    api.blocks().then(setBlocked, () => {});
+    setDeleting(false);
+    setConfirmName("");
   }, [open]);
+
+  const deleteAccount = async () => {
+    try {
+      await api.deleteAccount(confirmName);
+      onDeleted();
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  };
 
   const togglePush = async () => {
     buzz(8);
@@ -179,6 +196,60 @@ export function Settings({
           >
             <LogOut size={22} /> sign out here
           </button>
+
+          {blocked.length > 0 && (
+            <>
+              <Label>blocked</Label>
+              {blocked.map((b) => (
+                <div key={b.username} className="flex items-center gap-3 py-2">
+                  <Avatar name={b.username} color={b.color} size={44} />
+                  <p className="flex-1 truncate font-bold">{b.username}</p>
+                  <button
+                    onClick={() => api.unblock(b.username).then(() => setBlocked((l) => l.filter((x) => x.username !== b.username)))}
+                    className="rounded-full bg-white/10 px-4 py-2 font-bold active:scale-95"
+                  >
+                    unblock
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
+
+          {!deleting ? (
+            <button
+              onClick={() => setDeleting(true)}
+              className="mt-10 flex w-full items-center justify-center gap-2 rounded-full py-4 font-bold text-red-400/80 active:scale-[.98]"
+            >
+              <Trash2 size={20} /> delete my account
+            </button>
+          ) : (
+            <div className="mt-10 rounded-[2rem] bg-red-500/10 p-5">
+              <p className="text-lg font-black text-red-400">This deletes @{me.username} for good.</p>
+              <p className="mt-1 text-sm text-white/60">
+                Your snaps, chats, friends, devices and passkeys go from the server, and the name is free for anyone. Groups you run pass to the next member.
+              </p>
+              <input
+                value={confirmName}
+                onChange={(e) => setConfirmName(e.target.value.toLowerCase())}
+                placeholder={`type ${me.username} to confirm`}
+                autoCapitalize="none"
+                autoCorrect="off"
+                className="mt-4 w-full rounded-full bg-black/40 px-5 py-4 text-lg font-bold outline-none placeholder:text-white/30"
+              />
+              <div className="mt-3 flex gap-2">
+                <button onClick={() => setDeleting(false)} className="flex-1 rounded-full bg-white/10 py-4 font-bold">
+                  keep it
+                </button>
+                <button
+                  disabled={confirmName.replace(/^@/, "") !== me.username}
+                  onClick={deleteAccount}
+                  className="flex-1 rounded-full bg-red-500 py-4 font-black text-white disabled:opacity-30"
+                >
+                  delete
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </Sheet>
       {scanning && <Scanner hint="scan the code on the new device" onClose={() => setScanning(false)} onCode={approve} />}

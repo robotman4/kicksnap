@@ -59,6 +59,17 @@ def are_friends(conn, a: int, b: int) -> bool:
     ).fetchone()[0] == 2
 
 
+# SQL condition: no block either way between :me and the row's sender
+NOT_BLOCKED = """NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.user_id = :me AND b.blocked_id = {col})
+                                                  OR (b.user_id = {col} AND b.blocked_id = :me))"""
+
+
+def blocked(conn, a: int, b: int) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM blocks WHERE (user_id = ? AND blocked_id = ?) OR (user_id = ? AND blocked_id = ?)", (a, b, b, a)
+    ).fetchone() is not None
+
+
 def member_ids(conn, group_id: int) -> list[int]:
     return [r[0] for r in conn.execute("SELECT user_id FROM group_members WHERE group_id = ? ORDER BY joined_at", (group_id,))]
 
@@ -141,12 +152,13 @@ def _friend_row(conn, me: int, f) -> dict:
 def _group_row(conn, me: int, g) -> dict:
     new = conn.execute(
         f"""SELECT {SNAP_COLS} FROM snaps s JOIN deliveries d ON d.snap_id = s.id JOIN users u ON u.id = s.sender_id
-           WHERE s.group_id = ? AND d.recipient_id = ? AND d.opened_at IS NULL ORDER BY s.created_at""",
-        (g["id"], me),
+           WHERE s.group_id = :g AND d.recipient_id = :me AND d.opened_at IS NULL ORDER BY s.created_at""",
+        {"g": g["id"], "me": me},
     ).fetchall()
     unread = conn.execute(
-        "SELECT COUNT(*), MAX(created_at) FROM messages WHERE group_id = ? AND sender_id != ? AND created_at > ?",
-        (g["id"], me, read_at(conn, me, f"g:{g['id']}")),
+        f"""SELECT COUNT(*), MAX(created_at) FROM messages m
+           WHERE group_id = :g AND sender_id != :me AND created_at > :since AND {NOT_BLOCKED.format(col="m.sender_id")}""",
+        {"g": g["id"], "me": me, "since": read_at(conn, me, f"g:{g['id']}")},
     ).fetchone()
     if new:
         return _row("new", new[-1]["created_at"], "snap", new, unread[0])
@@ -203,9 +215,9 @@ def messages(key: str, user=Depends(current_user)):
             seen = read_at(conn, target["id"], f"u:{me}")
         else:
             rows = conn.execute(
-                """SELECT m.id, m.body, m.created_at, u.username, u.color FROM messages m JOIN users u ON u.id = m.sender_id
-                   WHERE m.group_id = ? ORDER BY m.id DESC LIMIT 100""",
-                (target["id"],),
+                f"""SELECT m.id, m.body, m.created_at, u.username, u.color FROM messages m JOIN users u ON u.id = m.sender_id
+                   WHERE m.group_id = :g AND {NOT_BLOCKED.format(col="m.sender_id")} ORDER BY m.id DESC LIMIT 100""",
+                {"g": target["id"], "me": me},
             ).fetchall()
             seen = 0
     return {
@@ -252,7 +264,7 @@ async def send_message(key: str, msg: NewMessage, user=Depends(current_user)):
             title = "kicksnap"
         else:
             conn.execute("INSERT INTO messages (sender_id, group_id, body, created_at) VALUES (?, ?, ?, ?)", (me, target["id"], body, now()))
-            recipients = [(m, key) for m in member_ids(conn, target["id"]) if m != me]
+            recipients = [(m, key) for m in member_ids(conn, target["id"]) if m != me and not blocked(conn, me, m)]
             title = target["name"]
         # sending is reading: your own chat shouldn't show as unread
         chat = f"{kind}:{target['id']}"

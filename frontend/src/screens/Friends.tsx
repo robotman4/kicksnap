@@ -93,6 +93,12 @@ export function Friends({
           <Section title="added you">
             {lists.incoming.map((f) => (
               <Row key={f.username} name={f.username} color={f.color}>
+                <button
+                  onClick={() => api.block(f.username).then(() => (toast(`blocked @${f.username}`), onChanged()), (e) => toast(e.message))}
+                  className="rounded-full bg-white/10 px-4 py-2 font-bold text-white/60 active:scale-95"
+                >
+                  block
+                </button>
                 <button onClick={() => add(f.username)} className="rounded-full bg-accent px-5 py-2 font-bold text-black active:scale-95">
                   accept
                 </button>

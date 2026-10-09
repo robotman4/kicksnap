@@ -226,6 +226,11 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
           }}
           onSnap={() => snapAt(talkingNow.key)}
           onInfo={() => talkingNow.group && setGroupInfo(Number(talkingNow.key.slice(2)))}
+          onGone={() => {
+            setTalking(null);
+            refresh();
+          }}
+          toast={setToast}
         />
       )}
 
@@ -271,6 +276,7 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
         onLogout={() => {
           api.logout().finally(() => setMe(null));
         }}
+        onDeleted={() => setMe(null)}
         toast={setToast}
       />
 
