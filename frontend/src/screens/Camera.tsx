@@ -42,6 +42,9 @@ async function mirror(blob: Blob): Promise<Blob> {
   return new Promise((ok) => c.toBlob((b) => ok(b ?? blob), "image/jpeg", 0.92));
 }
 
+// Every iPhone browser is WebKit; Chrome on iOS says CriOS, not Chrome/.
+const IS_WEBKIT = /AppleWebKit/.test(navigator.userAgent) && !/Chrome\/|Android/.test(navigator.userAgent);
+
 const MAX_VIDEO_MS = 10_000;
 const HOLD_MS = 220;
 
@@ -81,19 +84,27 @@ export function Camera({
   const [flash, setFlash] = useState(false);
   const mirrored = facing === "user";
 
+  const gen = useRef(0);
   const stop = () => {
+    gen.current++;
     stream.current?.getTracks().forEach((t) => t.stop());
     stream.current = null;
   };
 
   const start = useCallback(async () => {
     stop();
+    const mine = gen.current;
     try {
       const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, ...STREAM }, audio: false });
+      // stopped or restarted while iOS was asking for the camera: drop this one
+      if (mine !== gen.current) return s.getTracks().forEach((t) => t.stop());
       stream.current = s;
       if (video.current) video.current.srcObject = s;
       if (backdrop.current) backdrop.current.srcObject = s;
-      setFocus(s.getVideoTracks()[0], "continuous");
+      const track = s.getVideoTracks()[0];
+      setFocus(track, "continuous");
+      // iOS ends the track when something else grabs the camera; come back instead of staying black
+      track.addEventListener("ended", () => stream.current === s && start());
       setDenied(false);
     } catch {
       setDenied(true);
@@ -142,21 +153,26 @@ export function Camera({
     setTimeout(() => setFlash(false), 120);
     buzz(12);
     let blob: Blob | null = null;
-    // A real still from the sensor (full resolution, autofocused) where the browser
-    // supports it (Chrome/Android). Safari doesn't, so it falls back to the frame.
-    if (globalThis.ImageCapture) {
+    // A real still from the sensor (full resolution, autofocused) on Chrome/Android.
+    // Not on iPhone: WebKit's takePhoto reconfigures the camera mid-stream, which
+    // blanks the preview, can hang, and can leave the track dead. The frame there
+    // is already full stream resolution.
+    if (globalThis.ImageCapture && !IS_WEBKIT) {
       try {
         const ic = new globalThis.ImageCapture(track);
-        const caps = await ic.getPhotoCapabilities().catch(() => null);
-        const max = caps?.imageWidth ? { imageWidth: caps.imageWidth.max } : undefined;
-        // some devices reject an explicit size; the default is still a full still
-        blob = await ic.takePhoto(max).catch(() => ic.takePhoto());
-        if (mirrored) blob = await mirror(blob);
+        const shot = (async () => {
+          const caps = await ic.getPhotoCapabilities().catch(() => null);
+          const max = caps?.imageWidth ? { imageWidth: caps.imageWidth.max } : undefined;
+          // some devices reject an explicit size; the default is still a full still
+          return ic.takePhoto(max).catch(() => ic.takePhoto());
+        })();
+        blob = await Promise.race([shot, new Promise<null>((ok) => setTimeout(() => ok(null), 3000))]);
+        if (blob && mirrored) blob = await mirror(blob);
       } catch {
         blob = null;
       }
     }
-    blob ??= await grabFrame(v);
+    if (!blob && v.videoWidth) blob = await grabFrame(v);
     if (blob) onCapture({ blob, kind: "photo", url: URL.createObjectURL(blob) });
   };
 
