@@ -69,8 +69,15 @@ own key; the account's identity key signs the list of its devices and moves to a
 Friends get a "key changed" notice if it ever changes, and scanning each other's code in person verifies them.
 Reports still work: the reporter's app sends what it decrypted, and the server checks the sender's signature.
 
-Protocol (for other clients, like the coming Android app): [docs/e2e.md](docs/e2e.md), with test vectors in
+Protocol (for other clients, like the Android app): [docs/e2e.md](docs/e2e.md), with test vectors in
 [docs/e2e-vectors.json](docs/e2e-vectors.json).
+
+## Android and iPhone app
+
+A native Flutter app lives in [app/](app/README.md): same accounts, same encryption, signs in by scanning a QR
+from a device that's already signed in. The newest Android test build is at
+[releases/android-latest](https://github.com/robotman4/kicksnap/releases/tag/android-latest). iPhone builds
+are made on a Mac with Xcode (steps in [app/README.md](app/README.md)).
 
 ## How snaps burn
 

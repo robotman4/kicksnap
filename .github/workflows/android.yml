@@ -1,0 +1,100 @@
+name: android
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths: ["app/**", "backend/**", "docs/e2e*", ".github/workflows/android.yml"]
+  pull_request:
+    paths: ["app/**", "backend/**", "docs/e2e*", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: "3.47.7"
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - name: crypto vectors + interop against a real server
+        run: |
+          pip install -r ../backend/requirements.txt
+          export DATA_DIR=$(mktemp -d)
+          (cd ../backend && uvicorn app.main:app --port 8765 > "$DATA_DIR/server.log" 2>&1 &)
+          for i in $(seq 30); do curl -fs localhost:8765/api/v1/health >/dev/null && break; sleep 1; done
+          KIKS_TEST_SERVER=http://127.0.0.1:8765 flutter test || { cat "$DATA_DIR/server.log"; exit 1; }
+
+      # Optional: a real release key from secrets (see app/README.md). Without it the
+      # checked-in dev key signs the build, so test builds install over each other.
+      - name: release key
+        env:
+          KEYSTORE_B64: ${{ secrets.KIKS_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KIKS_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KIKS_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KIKS_KEY_PASSWORD }}
+        if: env.KEYSTORE_B64 != ''
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > android/release.jks
+          printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
+
+      # KIKS_SERVER (repo variable, e.g. https://kiks.example.com) pre-fills the server on first start
+      - run: >
+          flutter build apk --release
+          --build-number=${{ github.run_number }}
+          --dart-define=KIKS_SERVER=${{ vars.KIKS_SERVER }}
+      - run: mv build/app/outputs/flutter-apk/app-release.apk build/kiks-${{ github.run_number }}.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kiks-android-${{ github.run_number }}
+          path: app/build/kiks-${{ github.run_number }}.apk
+          if-no-files-found: error
+
+  # Pushes to main also refresh a pre-release, so the newest APK has a stable download link
+  # you can open on the phone: .../releases/download/android-latest/kiks.apk
+  publish:
+    needs: apk
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: kiks-android-${{ github.run_number }}
+      - run: mv kiks-${{ github.run_number }}.apk kiks.apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          target_commitish: ${{ github.sha }}
+          name: Kiks for Android (latest main build)
+          prerelease: true
+          make_latest: false
+          files: kiks.apk
+          body: |
+            Newest Android build from `main` (CI run ${{ github.run_number }}, ${{ github.sha }}).
+            Open this page on the phone, download kiks.apk and install it (allow installs from your browser once).
+            Test build: signed with the dev key unless release-key secrets are set.

@@ -28,6 +28,8 @@ proxy with a real certificate.
 - `npm run build` in `frontend/` must pass (it type-checks).
 - `cd backend && pip install -r requirements-dev.txt && python -m pytest` must pass. CI runs it, the frontend
   build and an image smoke test on every pull request. Add a test in `backend/tests/` for API changes.
+- App (`app/`): `flutter analyze && flutter test` must pass. Protocol changes go in `docs/e2e.md`, the web's
+  `e2e.ts` and `app/lib/e2e.dart` together; CI runs the Dart client against the real backend.
 - Say in the PR how you tested on a real device, and include screenshots for UI changes, ideally from a phone.
 - API changes: add to `/api/v1` without breaking existing clients. A breaking change needs a new version
   (`/api/v2`) next to the old one. See `backend/app/api.py`.

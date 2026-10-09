@@ -4,6 +4,11 @@ Versions follow [semver](https://semver.org). Release images: `ghcr.io/robotman4
 
 ## Unreleased
 
+- **Android app** (Flutter, [app/](app/README.md)). Camera-first like the web app: snaps, chats, groups,
+  block/report, sign-in by QR from another device. Interoperates with the web app's E2E encryption; CI checks it
+  against the real server on every build and publishes an APK to the `android-latest` pre-release. No push
+  notifications yet. iOS builds from the same code on a Mac.
+
 - **Snaps and chats are end-to-end encrypted** ([docs/e2e.md](docs/e2e.md)). Per-device keys, an account identity
   key that signs the device list and travels inside the QR link, "key changed" notices, verify by scanning a
   friend's code, reports with signature-checked proof. The terms page says so.
