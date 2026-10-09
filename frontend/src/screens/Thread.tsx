@@ -6,6 +6,7 @@ import { Sheet } from "../components/Sheet";
 import { api, charCount, Chat, clip, MAX_CHARS, Message } from "../lib/api";
 import { buzz } from "../lib/feel";
 import { useVisualViewport } from "../lib/viewport";
+import { acknowledge, openTexts, sealText, useKeys } from "../lib/e2e";
 
 /** A conversation: short texts, plus a camera button to snap them. `tick` bumps on live events. */
 export function Thread({
@@ -48,9 +49,12 @@ export function Thread({
   const input = useRef<HTMLInputElement>(null);
   const vv = useVisualViewport();
 
+  const keys = useKeys();
+  const them = chat.group ? null : keys.contacts[who];
+
   const load = () =>
-    api.messages(chat.key).then((r) => {
-      setMessages(r.messages);
+    api.messages(chat.key).then(async (r) => {
+      setMessages(await openTexts(chat, r.messages));
       setSeenAt(r.seen_at);
       api.read(chat.key).catch(() => {});
     }, () => {});
@@ -70,10 +74,12 @@ export function Thread({
     if (!body || busy) return;
     setBusy(true);
     try {
-      await api.say(chat.key, body);
+      await api.say(chat.key, await sealText(chat.key, body));
       buzz(8);
       setText("");
       await load();
+    } catch (e) {
+      toast((e as Error).message);
     } finally {
       setBusy(false);
       input.current?.focus();
@@ -109,7 +115,18 @@ export function Thread({
       </header>
 
       <div ref={list} className="flex-1 overflow-y-auto overscroll-contain px-4 py-4">
-        <p className="mb-4 text-center text-xs font-semibold text-white/30">chats disappear after 24h</p>
+        <p className="mb-4 text-center text-xs font-semibold text-white/30">🔒 end-to-end encrypted · chats disappear after 24h</p>
+        {them?.changed && (
+          <div className="mb-4 rounded-3xl bg-white/10 p-4">
+            <p className="font-black">🔑 @{who}'s key changed</p>
+            <p className="mt-1 text-sm text-white/60">
+              They probably got a new phone or reset Kiks. If you weren't expecting that, scan their code in person to check it's them.
+            </p>
+            <button onClick={() => acknowledge(who)} className="mt-3 rounded-full bg-white px-5 py-2 font-black text-black active:scale-95">
+              ok
+            </button>
+          </div>
+        )}
         {messages.length === 0 && <p className="mt-16 text-center text-2xl font-black text-white/30">say hi 👋</p>}
         {messages.map((m, i) => {
           const firstOfRun = messages[i - 1]?.from !== m.from;
@@ -120,15 +137,21 @@ export function Thread({
                   {m.from}
                 </span>
               )}
-              <p
-                onClick={() => !m.mine && !window.getSelection()?.toString() && setTapped(m)}
-                className={`max-w-[80%] whitespace-pre-wrap break-words rounded-3xl px-4 py-2.5 text-lg font-semibold leading-snug ${
-                  m.mine ? "bg-accent text-black" : "bg-white/10 active:bg-white/15"
-                }`}
-                style={{ userSelect: "text", WebkitUserSelect: "text" }}
-              >
-                {m.body}
-              </p>
+              {m.locked ? (
+                <p className="max-w-[80%] rounded-3xl border-2 border-dashed border-white/15 px-4 py-2.5 text-sm font-semibold text-white/40">
+                  🔒 {m.locked === "nokey" ? "sent before this device was set up" : "couldn't be verified"}
+                </p>
+              ) : (
+                <p
+                  onClick={() => !m.mine && !window.getSelection()?.toString() && setTapped(m)}
+                  className={`max-w-[80%] whitespace-pre-wrap break-words rounded-3xl px-4 py-2.5 text-lg font-semibold leading-snug ${
+                    m.mine ? "bg-accent text-black" : "bg-white/10 active:bg-white/15"
+                  }`}
+                  style={{ userSelect: "text", WebkitUserSelect: "text" }}
+                >
+                  {m.body}
+                </p>
+              )}
               {!chat.group && m === lastMine && (
                 <span className="mr-2 mt-1 text-xs font-bold text-white/40">{seenAt >= m.at ? "seen" : "delivered"}</span>
               )}
@@ -173,7 +196,12 @@ export function Thread({
           <div className="flex flex-col gap-3 px-6 pb-[max(env(safe-area-inset-bottom),24px)]">
             <div className="mb-2 flex items-center gap-4">
               <Avatar name={chat.name} color={chat.color} size={56} />
-              <h2 className="truncate text-3xl font-black">@{chat.name}</h2>
+              <div className="min-w-0">
+                <h2 className="truncate text-3xl font-black">@{chat.name}</h2>
+                <p className="text-sm font-bold text-white/40">
+                  {them?.verified ? "✓ verified in person" : them?.changed ? "🔑 key changed" : "not verified · scan their code to verify"}
+                </p>
+              </div>
             </div>
             <button
               onClick={() => act(api.removeFriend(who), `removed @${who}`)}

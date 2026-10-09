@@ -7,9 +7,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --experimental-strip-types --no-warnings --test test/crypto.test.mjs"
   },
   "dependencies": {
+    "@noble/curves": "2.0.1",
     "jsqr": "1.4.0",
     "lucide-react": "0.468.0",
     "qrcode": "1.5.4",

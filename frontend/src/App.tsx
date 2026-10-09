@@ -15,6 +15,8 @@ import { GroupInfo, NewGroup } from "./screens/Groups";
 import { AdminView } from "./screens/Admin";
 import { Thread } from "./screens/Thread";
 import { Viewer } from "./screens/Viewer";
+import { KeysSheet } from "./components/Keys";
+import { ensure, forget, forgetBundles, leave, observe, sealSnap, useKeys } from "./lib/e2e";
 
 const CHATS = 0;
 const CAMERA = 1;
@@ -39,7 +41,8 @@ export default function App() {
   if (booting) return <div className="h-full bg-black" />;
   if (!me) return <Welcome onIn={setMe} />;
   if (!me.username) return <PickName onDone={setMe} />;
-  if (me.suspended_until !== undefined) return <Suspended me={me} onOut={() => api.logout().finally(() => setMe(null))} onBack={() => api.me().then(setMe, () => {})} />;
+  if (me.suspended_until !== undefined)
+    return <Suspended me={me} onOut={() => leave().finally(() => api.logout().finally(() => setMe(null)))} onBack={() => api.me().then(setMe, () => {})} />;
   return <Home me={me as User & { username: string }} setMe={setMe} />;
 }
 
@@ -70,10 +73,21 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
           // suspended while the app was open: show it
           if (e instanceof ApiError && e.status === 403) api.me().then(setMe, () => {});
         }),
-        api.friends().then(setLists).catch(() => {}),
+        api.friends().then((l) => {
+          setLists(l);
+          // pin friends' identity keys; a change shows as "key changed"
+          l.friends.forEach((f) => observe(f.username, f.key));
+        }).catch(() => {}),
       ]),
     []
   );
+
+  const keys = useKeys();
+  const [keysOpen, setKeysOpen] = useState(false);
+  const syncKeys = useCallback(() => {
+    ensure(me.username).catch(() => {});
+  }, [me.username]);
+  useEffect(syncKeys, [syncKeys]);
 
   useEffect(() => {
     refresh();
@@ -85,6 +99,10 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
     document.addEventListener("visibilitychange", back);
     const stop = live(refresh, (e) => {
       refresh();
+      if (e.type === "keys") {
+        forgetBundles();
+        if (e.user === me.username) syncKeys(); // another device of ours changed the keys
+      }
       setTick((t) => t + 1);
       if (e.type === "snap" || e.type === "message") {
         buzz([10, 60, 10]);
@@ -98,7 +116,7 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
       stop();
       document.removeEventListener("visibilitychange", back);
     };
-  }, [refresh]);
+  }, [refresh, syncKeys, me.username]);
 
   const unread = chats.reduce((n, c) => n + c.snaps.length, 0);
 
@@ -122,7 +140,9 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
     setOutbox((o) => o.map((j) => (j.id === job.id ? { ...j, failed: false } : j)));
     try {
       const { file, overlay } = await job.made;
-      await api.send(file, overlay, job.to, job.seconds);
+      const { sealed, to, skipped } = await sealSnap(file, overlay, job.to, job.seconds);
+      if (skipped.length) setToast(`@${skipped.join(", @")} needs to update Kiks first`);
+      if (to.length) await api.send(sealed, to, job.seconds);
       buzz([8, 40, 16]);
       await refresh();
       setOutbox((o) => o.filter((j) => j.id !== job.id));
@@ -133,8 +153,8 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
       }
     } catch (e) {
       setOutbox((o) => o.map((j) => (j.id === job.id ? { ...j, failed: true } : j)));
-      // network drops just show on the row; only surface what the server actually said
-      if (e instanceof ApiError) setToast(e.message);
+      // network drops just show on the row; surface what the server or the encryption said
+      if (!(e instanceof TypeError)) setToast((e as Error).message);
     }
   };
 
@@ -283,9 +303,14 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
           pref.set("seconds", String(s));
         }}
         onLogout={() => {
-          api.logout().finally(() => setMe(null));
+          leave().finally(() => api.logout().finally(() => setMe(null)));
         }}
-        onDeleted={() => setMe(null)}
+        onDeleted={() => forget().finally(() => setMe(null))}
+        onKeys={() => {
+          setSettings(false);
+          setKeysOpen(true);
+        }}
+        onDevicesChanged={syncKeys}
         onAdmin={() => {
           setSettings(false);
           setAdminOpen(true);
@@ -312,6 +337,18 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
           </button>
         </div>
       )}
+
+      {keys.locked && !keysOpen && (
+        <button
+          onClick={() => setKeysOpen(true)}
+          className="fixed inset-x-4 top-[max(env(safe-area-inset-top),12px)] z-20 flex items-center gap-3 rounded-full bg-white px-5 py-3 text-left font-black text-black shadow-2xl active:scale-[.98]"
+        >
+          <span className="text-xl">🔒</span>
+          <span className="flex-1 leading-tight">this device can't open snaps yet</span>
+          <span className="rounded-full bg-black px-3 py-1 text-sm text-accent">fix</span>
+        </button>
+      )}
+      <KeysSheet open={keysOpen} me={me.username} onClose={() => setKeysOpen(false)} toast={setToast} />
 
       {adminOpen && <AdminView tick={tick} onClose={() => setAdminOpen(false)} toast={setToast} />}
 

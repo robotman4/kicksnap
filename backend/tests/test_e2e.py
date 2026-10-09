@@ -19,7 +19,7 @@ def link(client, existing: Client) -> Client:
     l_priv, l_pub = new_x()
     start = client.post("/api/v1/link/start", json={"link_key": b64(l_pub)}).json()
     blob = seal(l_pub, existing.ik, "link")
-    r = existing.user.post(f"/api/v1/link/kicksnap-link:{start['code']}/approve", json={"key_blob": b64(blob)})
+    r = existing.user.post(f"/api/v1/link/kiks-link:{start['code']}/approve", json={"key_blob": b64(blob)})
     assert r.status_code == 200, r.text
     r = client.get(f"/api/v1/link/{start['code']}?secret={start['secret']}", headers=AUTH).json()
     assert r["approved"]

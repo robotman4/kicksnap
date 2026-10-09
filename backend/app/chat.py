@@ -298,7 +298,7 @@ async def send_message(key: str, msg: NewMessage, user=Depends(current_user)):
     """The 160-character limit is the client's job now: the server only sees ciphertext."""
     body = msg.body.strip()
     if msg.keys is None:
-        raise HTTPException(426, "update kicksnap to send chats (refresh the app)")
+        raise HTTPException(426, "update Kiks to send chats (refresh the app)")
     if not body:
         raise HTTPException(400, "say something")
     if len(body) > 4096:

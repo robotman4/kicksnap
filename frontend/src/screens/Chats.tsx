@@ -3,6 +3,7 @@ import { Avatar } from "../components/Avatar";
 import { PullToRefresh } from "../components/PullToRefresh";
 import { Chat, ChatState } from "../lib/api";
 import { ago } from "../lib/feel";
+import { useKeys } from "../lib/e2e";
 
 // Snapchat colours: snaps in the accent, chat in blue.
 const CHAT_BLUE = "#3DC9FF";
@@ -63,6 +64,7 @@ export function Chats({
   onNewGroup: () => void;
   onRefresh: () => Promise<unknown>;
 }) {
+  const { contacts } = useKeys();
   return (
     <div className="flex h-full flex-col bg-black text-white">
       <header className="flex items-center justify-between px-5 pb-3 pt-[max(env(safe-area-inset-top),18px)]">
@@ -94,7 +96,10 @@ export function Chats({
               >
                 <Avatar name={c.name} color={c.color} size={52} group={c.group} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-lg font-bold">{c.name}</p>
+                  <p className="truncate text-lg font-bold">
+                    {c.name}
+                    {!c.group && contacts[c.name]?.changed && <span className="ml-2 text-sm font-black text-amber-300">🔑 key changed</span>}
+                  </p>
                   {c.away ? (
                     <p className="text-sm text-white/35">unavailable</p>
                   ) : out ? (

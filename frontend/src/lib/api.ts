@@ -1,10 +1,27 @@
 export type User = { username: string | null; color: string; admin?: boolean; suspended_until?: number };
-export type Friend = { username: string; color: string };
-export type SnapMeta = { id: string; kind: "photo" | "video"; seconds: number; has_overlay: number; created_at: number; sender: string };
+/** key: the friend's identity key (E2E, docs/e2e.md), null until their app has made one */
+export type Friend = { username: string; color: string; key?: string | null };
+export type SnapMeta = { id: string; kind: "photo" | "video"; seconds: number; has_overlay: number; created_at: number; sender: string; e2e?: number };
 export type ChatState = "new" | "received" | "delivered" | "opened" | "none";
 /** key is "u:<username>" for a friend, "g:<id>" for a group. */
 export type Chat = { key: string; name: string; color: string; group: boolean; away?: boolean; state: ChatState; kind: "snap" | "chat"; at: number; snaps: SnapMeta[]; unread: number };
-export type Message = { id: number; body: string; at: number; from: string; color: string; mine: boolean };
+/** body is the encrypted envelope while e2e and not yet opened; e2e.openTexts swaps in the text. */
+export type Message = {
+  id: number;
+  body: string;
+  at: number;
+  from: string;
+  color: string;
+  mine: boolean;
+  e2e?: boolean;
+  key?: string | null;
+  /** couldn't be opened here: "nokey" = sent before this device was set up */
+  locked?: "nokey" | "bad";
+  /** what a report needs to prove the sender signed it */
+  proof?: { sent_at: number; nonce: string; sig: string };
+};
+export type DeviceList = { payload: string; sig: string; version: number };
+export type KeyBundle = { identity_key: string | null; device_list: DeviceList | null; devices: { id: number; enc_key: string }[] };
 export type InviteMode = "open" | "members" | "admin";
 export type Group = {
   id: number;
@@ -32,7 +49,10 @@ export type AdminReport = {
   media: string | null;
   media_kind: "photo" | "video" | null;
   /** their texts, copied when reported; group is null for direct texts */
-  texts: { body: string; at: number; group: string | null }[];
+  texts: { body: string; at: number; group: string | null; verified?: boolean | null }[];
+  /** E2E snaps: true = the sender's signature checks out, false = it doesn't, null = from before E2E */
+  media_verified?: boolean | null;
+  overlay?: string | null;
   shots: string[];
   was_friend: boolean;
   friend_reporters: number;
@@ -48,7 +68,7 @@ export type Suspension =
       appeal: { body: string; at: number; outcome: "lifted" | "rejected" | null; reply: string } | null;
     };
 export type AdminAppeal = { id: number; username: string; body: string; at: number; until: number; reason: string };
-export type TheirText = { id: number; body: string; at: number; group: string | null };
+export type TheirText = { id: number; body: string; at: number; group: string | null; e2e?: boolean; key?: string | null; to?: string; proof?: Message["proof"] };
 export type AdminUser = { username: string; color: string; created_at: number; devices: number; admin: boolean; suspended: boolean; suspended_until: number | null; open_reports: number };
 export type Reserved = { name: string; reason: string; by: string; at: number; expires_at: number | null };
 
@@ -82,10 +102,25 @@ export const api = {
   logout: () => post("/api/v1/auth/logout"),
   setColor: (color: string) => call<User>("/api/v1/me", { method: "PATCH", body: json({ color }) }),
 
-  linkStart: () => post<{ code: string; secret: string; expires_in: number }>("/api/v1/link/start"),
+  linkStart: (link_key?: string) => post<{ code: string; secret: string; expires_in: number }>("/api/v1/link/start", { link_key }),
   linkPoll: (code: string, secret: string) =>
-    call<{ approved: boolean; user?: User }>(`/api/v1/link/${code}?secret=${encodeURIComponent(secret)}`),
-  linkApprove: (code: string) => post(`/api/v1/link/${encodeURIComponent(code)}/approve`),
+    call<{ approved: boolean; user?: User; key_blob?: string | null }>(`/api/v1/link/${code}?secret=${encodeURIComponent(secret)}`),
+  linkKey: (code: string) => call<{ link_key: string | null }>(`/api/v1/link/${encodeURIComponent(code)}/key`),
+  linkApprove: (code: string, key_blob?: string) => post(`/api/v1/link/${encodeURIComponent(code)}/approve`, { key_blob }),
+
+  keys: {
+    me: () => call<KeyBundle & { device_id: number }>("/api/v1/keys/me"),
+    identity: (identity_key: string, replace = false) => call("/api/v1/keys/identity", { method: "PUT", body: json({ identity_key, replace }) }),
+    device: (enc_key: string) => call("/api/v1/keys/device", { method: "PUT", body: json({ enc_key }) }),
+    devices: (payload: string, sig: string) => call("/api/v1/keys/devices", { method: "PUT", body: json({ payload, sig }) }),
+    bundles: (users: string[], groups: number[]) =>
+      call<{ users: Record<string, KeyBundle> }>(`/api/v1/keys?users=${users.map(encodeURIComponent).join(",")}&groups=${groups.join(",")}`),
+    request: (link_key: string) => post<{ code: string; secret: string; expires_in: number }>("/api/v1/keys/requests", { link_key }),
+    requestInfo: (code: string) => call<{ link_key: string }>(`/api/v1/keys/requests/${encodeURIComponent(code)}`),
+    approve: (code: string, key_blob: string) => post(`/api/v1/keys/requests/${encodeURIComponent(code)}/approve`, { key_blob }),
+    poll: (code: string, secret: string) =>
+      call<{ key_blob: string | null }>(`/api/v1/keys/requests/${encodeURIComponent(code)}/poll?secret=${encodeURIComponent(secret)}`),
+  },
   devices: () => call<{ devices: Device[]; passkeys: number }>("/api/v1/devices"),
   removeDevice: (id: number) => call(`/api/v1/devices/${id}`, { method: "DELETE" }),
 
@@ -116,16 +151,21 @@ export const api = {
     reason: Reason,
     note: string,
     block: boolean,
-    proof: { snap?: Blob | null; texts?: number[]; shots?: File[] } = {}
+    proof: { snap?: Blob | null; snapOverlay?: Blob | null; snapProof?: object | null; texts?: TheirText[]; shots?: File[] } = {}
   ) => {
     const form = new FormData();
     form.append("username", username);
     form.append("reason", reason);
     form.append("note", note);
     form.append("block", String(block));
-    const { snap, texts = [], shots = [] } = proof;
+    const { snap, snapOverlay, snapProof, texts = [], shots = [] } = proof;
     if (snap) form.append("file", snap, snap.type.startsWith("video") ? "snap.webm" : "snap.jpg");
-    texts.forEach((id) => form.append("message_ids", String(id)));
+    if (snap && snapProof) form.append("snap_proof", JSON.stringify(snapProof));
+    if (snap && snapOverlay) form.append("overlay", snapOverlay, "overlay.png");
+    texts.forEach((t) => form.append("message_ids", String(t.id)));
+    // E2E texts: what this device decrypted, plus the sender's signature for the server to check
+    const proofs = texts.filter((t) => t.e2e && t.proof).map((t) => ({ id: t.id, body: t.body, ...t.proof }));
+    if (proofs.length) form.append("text_proofs", JSON.stringify(proofs));
     shots.forEach((f) => form.append("shots", f, f.name || "screenshot.jpg"));
     return call("/api/v1/reports", { method: "POST", body: form });
   },
@@ -144,22 +184,27 @@ export const api = {
     release: (name: string) => call(`/api/v1/admin/reserved/${encodeURIComponent(name)}`, { method: "DELETE" }),
     log: () => call<{ admin: string; action: string; target: string; detail: string; at: number }[]>("/api/v1/admin/log"),
   },
-  /** `to` holds chat keys: friends and groups in one list. */
-  send: (blob: Blob, overlay: Blob | null, to: string[], seconds: number) => {
+  /** An encrypted snap from e2e.sealSnap. `to` holds chat keys: friends and groups in one list. */
+  send: (s: { file: Blob; overlay: Blob | null; envelope: string; keys: object; kind: string }, to: string[], seconds: number) => {
     const form = new FormData();
-    form.append("file", blob, blob.type.startsWith("video") ? "snap.webm" : "snap.jpg");
-    if (overlay) form.append("overlay", overlay, "overlay.png");
+    form.append("file", s.file, "snap");
+    if (s.overlay) form.append("overlay", s.overlay, "overlay");
     form.append("to", to.filter((k) => k.startsWith("u:")).map((k) => k.slice(2)).join(","));
     form.append("groups", to.filter((k) => k.startsWith("g:")).map((k) => k.slice(2)).join(","));
     form.append("seconds", String(seconds));
+    form.append("kind", s.kind);
+    form.append("envelope", s.envelope);
+    form.append("keys", JSON.stringify(s.keys));
     return call<{ sent_to: string[] }>("/api/v1/snaps", { method: "POST", body: form });
   },
+  snapKey: (id: string) =>
+    call<{ e2e: boolean; envelope: string | null; key: string | null; sender: string; to: string }>(`/api/v1/snaps/${id}/key`),
   media: (id: string) => call<Blob>(`/api/v1/snaps/${id}/media`),
   overlay: (id: string) => call<Blob>(`/api/v1/snaps/${id}/overlay`),
   open: (id: string) => post(`/api/v1/snaps/${id}/open`),
 
   messages: (key: string) => call<{ messages: Message[]; seen_at: number }>(`/api/v1/chats/${encodeURIComponent(key)}/messages`),
-  say: (key: string, body: string) => post(`/api/v1/chats/${encodeURIComponent(key)}/messages`, { body }),
+  say: (key: string, sealed: { body: string; keys: Record<string, string> }) => post(`/api/v1/chats/${encodeURIComponent(key)}/messages`, sealed),
   read: (key: string) => post(`/api/v1/chats/${encodeURIComponent(key)}/read`),
 
   newGroup: (name: string, members: string[]) => post<Group>("/api/v1/groups", { name, members }),
@@ -186,7 +231,8 @@ export type LiveEvent =
   | { type: "message"; chat: string }
   | { type: "read"; chat: string }
   | { type: "group"; closed?: string }
-  | { type: "reports" };
+  | { type: "reports" }
+  | { type: "keys"; user: string };
 
 /** WebSocket with dumb exponential reconnect. The cookie authenticates it. */
 export function live(onConnect: () => void, onEvent: (e: LiveEvent) => void): () => void {

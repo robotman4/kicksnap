@@ -4,6 +4,13 @@ Versions follow [semver](https://semver.org). Release images: `ghcr.io/robotman4
 
 ## Unreleased
 
+- **Snaps and chats are end-to-end encrypted** ([docs/e2e.md](docs/e2e.md)). Per-device keys, an account identity
+  key that signs the device list and travels inside the QR link, "key changed" notices, verify by scanning a
+  friend's code, reports with signature-checked proof. The terms page says so.
+- Clients from before E2E get "update Kiks" when they send; snaps and chats already on the server stay readable
+  until they burn. Each device sets up its keys on first start. A device signed in only with a passkey shows
+  "this device can't open snaps yet" until another of your devices approves it (or you make new keys).
+
 - **The app is now called Kiks.** App name, page title, home-screen name, notifications and docs say Kiks.
   "Snap" stays as the verb.
 

@@ -62,6 +62,16 @@ turn notifications on again. Payloads only say who sent something, never the sna
 - Accounts that never pick a name are deleted after a day.
 - Native apps and scripts use the same device secret as a bearer token instead of a cookie (see API below).
 
+## End-to-end encryption
+
+Snaps and chats are end-to-end encrypted: the server stores ciphertext and public keys only. Every device has its
+own key; the account's identity key signs the list of its devices and moves to a new device inside the QR link.
+Friends get a "key changed" notice if it ever changes, and scanning each other's code in person verifies them.
+Reports still work: the reporter's app sends what it decrypted, and the server checks the sender's signature.
+
+Protocol (for other clients, like the coming Android app): [docs/e2e.md](docs/e2e.md), with test vectors in
+[docs/e2e-vectors.json](docs/e2e-vectors.json).
+
 ## How snaps burn
 
 - A snap's media is deleted from disk once every recipient has opened it.
@@ -107,6 +117,7 @@ cd frontend && npm install && npm run dev
 
 # tests
 cd backend && pip install -r requirements-dev.txt && python -m pytest
+cd frontend && npm test   # web crypto against docs/e2e-vectors.json
 ```
 
 ## API

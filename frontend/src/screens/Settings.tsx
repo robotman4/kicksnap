@@ -1,4 +1,4 @@
-import { Bell, BellOff, Check, Fingerprint, LogOut, ShieldCheck, QrCode, RefreshCw, Smartphone, Sparkles, Trash2, X } from "lucide-react";
+import { Bell, BellOff, Check, Fingerprint, KeyRound, LogOut, ShieldCheck, QrCode, RefreshCw, Smartphone, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Scanner } from "../components/Scanner";
@@ -9,6 +9,21 @@ import { ACCENTS, ago, buzz, onColor, timerLabel, TIMERS } from "../lib/feel";
 import { addPasskey, passkeysSupported } from "../lib/passkey";
 import { disablePush, enablePush, pushState, PushState } from "../lib/push";
 import { reloadApp, updateAvailable } from "../lib/update";
+import { approve as approveDevice, useKeys } from "../lib/e2e";
+
+/** Typed codes can't carry the link key, so both screens show a number to compare. */
+export const confirmCheck = (check: string) => Promise.resolve(window.confirm(`Does the other screen show ${check}?`));
+
+/** Scanned or typed code from a device that wants in (or wants this account's keys). */
+export async function approveCode(code: string, toast: (t: string) => void) {
+  try {
+    const what = await approveDevice(code, confirmCheck);
+    buzz([10, 50, 20]);
+    toast(what === "keys" ? "keys sent 🔑" : "device added ✨");
+  } catch (e) {
+    toast((e as Error).message);
+  }
+}
 
 export function Settings({
   open,
@@ -20,6 +35,8 @@ export function Settings({
   onLogout,
   onDeleted,
   onAdmin,
+  onKeys,
+  onDevicesChanged,
   toast,
 }: {
   open: boolean;
@@ -31,8 +48,11 @@ export function Settings({
   onLogout: () => void;
   onDeleted: () => void;
   onAdmin: () => void;
+  onKeys: () => void;
+  onDevicesChanged: () => void;
   toast: (t: string) => void;
 }) {
+  const keys = useKeys();
   const [blocked, setBlocked] = useState<Friend[]>([]);
   const [deleting, setDeleting] = useState(false);
   const [confirmName, setConfirmName] = useState("");
@@ -93,14 +113,8 @@ export function Settings({
 
   const approve = async (code: string) => {
     setScanning(false);
-    try {
-      await api.linkApprove(code.replace(/^(kiks|kicksnap)-link:/i, ""));
-      buzz([10, 50, 20]);
-      toast("device added ✨");
-      setTimeout(load, 2500);
-    } catch (e) {
-      toast((e as Error).message);
-    }
+    await approveCode(code, toast);
+    setTimeout(load, 2500);
   };
 
   return (
@@ -119,6 +133,9 @@ export function Settings({
             </Tile>
             <Tile onClick={() => setScanning(true)} icon={<QrCode size={30} strokeWidth={2.5} />}>
               add a device
+            </Tile>
+            <Tile onClick={onKeys} icon={<KeyRound size={30} strokeWidth={2.5} />} on={keys.locked}>
+              {keys.locked ? "set up this device" : "encryption"}
             </Tile>
             {me.admin && (
               <Tile onClick={onAdmin} icon={<ShieldCheck size={30} strokeWidth={2.5} />}>
@@ -189,7 +206,7 @@ export function Settings({
               </div>
               {!d.this && (
                 <button
-                  onClick={() => api.removeDevice(d.id).then(load)}
+                  onClick={() => api.removeDevice(d.id).then(() => (load(), onDevicesChanged()))}
                   className="grid h-11 w-11 place-items-center rounded-full bg-white/5 text-white/60 active:scale-90"
                   aria-label="sign out that device"
                 >

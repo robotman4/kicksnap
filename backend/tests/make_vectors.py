@@ -35,11 +35,11 @@ def main():
 
     v["x25519"] = [{"priv": b64(dk_bob), "pub": b64(x_pub(dk_bob))}]
     v["hkdf"] = [
-        {"ikm": b64(ck), "salt": "", "info": "kicksnap/1 envelope", "out": b64(sym(ck, "envelope"))},
-        {"ikm": b64(ck), "salt": "", "info": "kicksnap/1 media", "out": b64(sym(ck, "media"))},
-        {"ikm": b64(det("shared")), "salt": b64(det("salt", 64)), "info": "kicksnap/1 wrap", "out": b64(hkdf(det("shared"), det("salt", 64), "kicksnap/1 wrap"))},
+        {"ikm": b64(ck), "salt": "", "info": "kiks/1 envelope", "out": b64(sym(ck, "envelope"))},
+        {"ikm": b64(ck), "salt": "", "info": "kiks/1 media", "out": b64(sym(ck, "media"))},
+        {"ikm": b64(det("shared")), "salt": b64(det("salt", 64)), "info": "kiks/1 wrap", "out": b64(hkdf(det("shared"), det("salt", 64), "kiks/1 wrap"))},
     ]
-    v["sign"] = [{"seed": b64(ik), "pub": b64(ed_pub(ik)), "text": "kicksnap/1 test\nhej", "sig": b64(sign(ik, "kicksnap/1 test\nhej"))}]
+    v["sign"] = [{"seed": b64(ik), "pub": b64(ed_pub(ik)), "text": "kiks/1 test\nhej", "sig": b64(sign(ik, "kiks/1 test\nhej"))}]
     v["fingerprint"] = [{"identity_key": b64(ed_pub(ik)), "fingerprint": fingerprint(ed_pub(ik))}]
     link = det("link key")
     v["check_number"] = [{"link_key": b64(x_pub(link)), "check": check_number(x_pub(link))}]

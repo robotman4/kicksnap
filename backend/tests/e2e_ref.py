@@ -44,7 +44,7 @@ def aead_open(key: bytes, blob: bytes) -> bytes:
 
 
 def sym(ck: bytes, label: str) -> bytes:
-    return hkdf(ck, b"", f"kicksnap/1 {label}")
+    return hkdf(ck, b"", f"kiks/1 {label}")
 
 
 # --- keys ---------------------------------------------------------------------
@@ -86,7 +86,7 @@ def seal(pub: bytes, pt: bytes, label: str, eph: bytes | None = None, nonce: byt
     e_pub = x_pub(e_priv)
     shared = X25519PrivateKey.from_private_bytes(e_priv).exchange(X25519PublicKey.from_public_bytes(pub))
     assert shared != bytes(32)
-    key = hkdf(shared, e_pub + pub, f"kicksnap/1 {label}")
+    key = hkdf(shared, e_pub + pub, f"kiks/1 {label}")
     return e_pub + aead_seal(key, pt, nonce)
 
 
@@ -95,25 +95,25 @@ def open_(priv: bytes, blob: bytes, label: str) -> bytes:
     shared = X25519PrivateKey.from_private_bytes(priv).exchange(X25519PublicKey.from_public_bytes(e_pub))
     if shared == bytes(32):
         raise ValueError("bad key")
-    key = hkdf(shared, e_pub + x_pub(priv), f"kicksnap/1 {label}")
+    key = hkdf(shared, e_pub + x_pub(priv), f"kiks/1 {label}")
     return aead_open(key, blob[32:])
 
 
 # --- signed texts -------------------------------------------------------------
 
 def device_list_text(username: str, version: int, devices: dict[int, bytes]) -> str:
-    return "\n".join(["kicksnap/1 devices", username, str(version)] + [f"{i} {b64(devices[i])}" for i in sorted(devices)])
+    return "\n".join(["kiks/1 devices", username, str(version)] + [f"{i} {b64(devices[i])}" for i in sorted(devices)])
 
 
 def snap_text(e: dict, to: str) -> str:
     return "\n".join([
-        "kicksnap/1 snap", e["from"], to, str(e["sent_at"]), e["nonce"], e["kind"], e["mime"], str(e["seconds"]),
+        "kiks/1 snap", e["from"], to, str(e["sent_at"]), e["nonce"], e["kind"], e["mime"], str(e["seconds"]),
         e["media"], e["overlay"] or "-",
     ])
 
 
 def text_text(e: dict, to: str) -> str:
-    return "\n".join(["kicksnap/1 text", e["from"], to, str(e["sent_at"]), e["nonce"], sha(e["body"].encode())])
+    return "\n".join(["kiks/1 text", e["from"], to, str(e["sent_at"]), e["nonce"], sha(e["body"].encode())])
 
 
 def check_number(link_pub: bytes) -> str:

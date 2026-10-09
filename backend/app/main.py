@@ -111,7 +111,7 @@ class AddFriend(BaseModel):
 @app.post(API + "/friends", dependencies=[Depends(limit("friend", 30, 60))])
 async def add_friend(body: AddFriend, user=Depends(current_user)):
     """Send a request, or accept one if they already added you."""
-    # a friend's QR code is kiks:<name>#<identity key> (kicksnap: before the rename)
+    # a friend's QR code is kiks:<name>#<identity key>
     name = body.username.strip().lower().removeprefix("kiks:").removeprefix("kicksnap:").split("#")[0].lstrip("@")
     with db() as conn:
         other = conn.execute("SELECT * FROM users WHERE username = ?", (name,)).fetchone()
@@ -167,7 +167,7 @@ async def send_snap(
     names = {n.strip().lower() for n in to.split(",") if n.strip()}
     group_ids = {int(g) for g in groups.split(",") if g.strip().isdigit()}
     if not envelope or not keys:
-        raise HTTPException(426, "update kicksnap to send snaps (refresh the app)")
+        raise HTTPException(426, "update Kiks to send snaps (refresh the app)")
     if not names and not group_ids:
         raise HTTPException(400, "pick someone")
     if seconds not in VIEW_SECONDS:

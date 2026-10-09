@@ -15,6 +15,7 @@ Only the latest release and the `main` branch get security fixes.
 
 - The Kiks server (`backend/`) and web app (`frontend/`): auth, device linking, passkeys, bearer tokens,
   access to snaps, texts and groups, admin endpoints, media handling, rate limits.
+- The end-to-end encryption protocol ([docs/e2e.md](docs/e2e.md)) and its implementations.
 - The container image and `compose.yml` defaults.
 
 ## Out of scope
@@ -25,5 +26,7 @@ Only the latest release and the `main` branch get security fixes.
 
 ## Things worth knowing
 
-- Snaps and texts are not end-to-end encrypted yet. Whoever runs a server can read what passes through it.
+- Snaps and texts are end-to-end encrypted ([docs/e2e.md](docs/e2e.md)). The server sees metadata (who, when,
+  photo/video, sizes) but not content. The web app is served by the server it talks to, so a malicious operator
+  could serve a modified app; that's the limit of E2E in any web app.
 - Device secrets are stored only as SHA-256 hashes. A leaked database doesn't give working sign-ins.

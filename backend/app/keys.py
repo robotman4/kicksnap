@@ -24,7 +24,7 @@ from .limits import limit
 
 router = APIRouter(prefix=f"{API}/keys")
 
-LIST_HEADER = "kicksnap/1 devices"
+LIST_HEADER = "kiks/1 devices"
 MAX_WRAP = 256  # a wrap is 32 + 12 + 96 + 16 bytes, ~210 chars of base64
 
 
@@ -218,7 +218,7 @@ def key_request(body: LinkKey, user=Depends(current_user)):
 
 def _mine(code: str, user) -> dict:
     _prune()
-    req = _requests.get(code.strip().upper().removeprefix("KICKSNAP-KEYS:"))
+    req = _requests.get(code.strip().upper().removeprefix("KIKS-KEYS:"))
     if not req or req["user_id"] != user["id"]:
         raise HTTPException(410, "that code expired, make a new one")
     return req
@@ -253,13 +253,13 @@ def key_request_poll(code: str, secret: str, user=Depends(current_user)):
 
 def snap_signed_text(sender: str, to: str, p: dict, media_hash: str) -> str:
     return "\n".join([
-        "kicksnap/1 snap", sender, to, str(p["sent_at"]), str(p["nonce"]), str(p["kind"]), str(p["mime"]),
+        "kiks/1 snap", sender, to, str(p["sent_at"]), str(p["nonce"]), str(p["kind"]), str(p["mime"]),
         str(p["seconds"]), media_hash, p.get("overlay") or "-",
     ])
 
 
 def text_signed_text(sender: str, to: str, p: dict) -> str:
-    return "\n".join(["kicksnap/1 text", sender, to, str(p["sent_at"]), str(p["nonce"]), sha(str(p["body"]).encode())])
+    return "\n".join(["kiks/1 text", sender, to, str(p["sent_at"]), str(p["nonce"]), sha(str(p["body"]).encode())])
 
 
 def wraps_for(conn, keys: dict, allowed_users: set[int]) -> list[tuple[int, str]]:

@@ -5,6 +5,7 @@ import { TermsLink } from "../components/Terms";
 import { api, User } from "../lib/api";
 import { buzz } from "../lib/feel";
 import { passkeysSupported, signInWithPasskey } from "../lib/passkey";
+import { adopt, newLinkKey } from "../lib/e2e";
 
 /** First thing a new device sees. Two giant buttons, no passwords anywhere. */
 export function Welcome({ onIn }: { onIn: (u: User) => void }) {
@@ -63,7 +64,7 @@ export function Welcome({ onIn }: { onIn: (u: User) => void }) {
 
 /** Returning user on a new device: passkey, or approve this device from your phone. */
 function Back({ onBack, onIn, onPasskey, error }: { onBack: () => void; onIn: (u: User) => void; onPasskey: () => void; error: string }) {
-  const [link, setLink] = useState<{ code: string; secret: string } | null>(null);
+  const [link, setLink] = useState<{ code: string; secret: string; check: string } | null>(null);
   const [qr, setQr] = useState("");
   const timer = useRef<number>();
   const done = useRef(onIn);
@@ -73,15 +74,18 @@ function Back({ onBack, onIn, onPasskey, error }: { onBack: () => void; onIn: (u
   useEffect(() => {
     let alive = true;
     const begin = async () => {
-      const l = await api.linkStart();
+      // the other device seals this account's identity key to this one-time key (docs/e2e.md)
+      const key = await newLinkKey();
+      const l = await api.linkStart(key.pub);
       if (!alive) return;
-      setLink(l);
-      setQr(await QRCode.toDataURL(`kiks-link:${l.code}`, { margin: 1, width: 480, color: { dark: "#000", light: "#0000" } }));
+      setLink({ ...l, check: key.check });
+      setQr(await QRCode.toDataURL(`kiks-link:${l.code}#${key.pub}`, { margin: 1, width: 480, color: { dark: "#000", light: "#0000" } }));
       const poll = async () => {
         try {
           const r = await api.linkPoll(l.code, l.secret);
           if (r.approved && r.user) {
             buzz([10, 50, 20]);
+            if (r.user.username) await adopt(r.user.username, key, r.key_blob);
             return done.current(r.user);
           }
           if (alive) timer.current = window.setTimeout(poll, 2000);
@@ -113,6 +117,7 @@ function Back({ onBack, onIn, onPasskey, error }: { onBack: () => void; onIn: (u
           </p>
           <p className="mt-1 text-lg font-black leading-tight">open Kiks, tap your face, scan this</p>
           <p className="mt-2 font-mono text-2xl font-black tracking-[0.2em]">{link?.code ?? "······"}</p>
+          {link && <p className="text-sm font-bold opacity-60">check {link.check}</p>}
         </div>
       </div>
 

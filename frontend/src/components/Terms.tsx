@@ -31,12 +31,21 @@ const SECTIONS: [string, string[]][] = [
     ],
   ],
   [
+    "End-to-end encrypted",
+    [
+      "Snaps and chats are end-to-end encrypted. They're locked on your phone and only unlocked on the phones of the people you send them to. The server only ever holds the locked version and can't see what's in them.",
+      "Each of your devices has its own key, and your devices only get your account's key from another of your devices (when you scan the code to add one). Friends see \"key changed\" if your key ever changes, and scanning each other's code in person verifies you.",
+      "The server still knows who you send to, when, and whether it's a photo, a video or a chat.",
+      "If you report someone, your app sends the snap or texts you picked to the people who run this server, unlocked, so they can look at it. Nothing else is ever unlocked for them.",
+    ],
+  ],
+  [
     "What the server keeps",
     [
       "Snaps are stored only until every recipient has opened them, then the file is deleted. Snaps nobody opens are deleted after 24 hours.",
       "Chat messages are deleted after 24 hours.",
-      "We don't keep copies after that. Snaps and chats are not end-to-end encrypted yet, so while they wait on the server, the server could technically read them.",
-      "To make the app work, the server keeps: your username and colour, who your friends are, your groups, who you've blocked, your signed-in devices (name and when last active) and the public half of your passkeys. Like any web server it can also log IP addresses.",
+      "We don't keep copies after that.",
+      "To make the app work, the server keeps: your username and colour, who your friends are, your groups, who you've blocked, your signed-in devices (name and when last active), the public half of your passkeys and of your encryption keys. Like any web server it can also log IP addresses.",
       "Notifications go through Apple's or Google's push service and only say who sent something, never what.",
       "No ads, no tracking, nothing sold.",
     ],

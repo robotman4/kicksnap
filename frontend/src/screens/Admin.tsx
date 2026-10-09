@@ -118,6 +118,16 @@ function Appeal({ a, onDone, toast }: { a: AdminAppeal; onDone: () => void; toas
   );
 }
 
+/** Snaps and texts are end-to-end encrypted, so proof comes from the reporter's app; the server checks the sender's signature. */
+function Proof({ verified, who }: { verified?: boolean | null; who: string }) {
+  if (verified === undefined || verified === null) return null;
+  return verified ? (
+    <span className="ml-3 mt-1 text-xs font-bold text-accent">✓ signed by @{who}</span>
+  ) : (
+    <span className="ml-3 mt-1 text-xs font-bold text-amber-300">⚠ not verified: only the reporter's word</span>
+  );
+}
+
 function Reports({ tick, toast }: { tick: number; toast: (t: string) => void }) {
   const [list, setList] = useState<AdminReport[] | null>(null);
   const [appeals, setAppeals] = useState<AdminAppeal[]>([]);
@@ -133,7 +143,7 @@ function Reports({ tick, toast }: { tick: number; toast: (t: string) => void }) 
   useEffect(() => {
     const urls: string[] = [];
     list?.forEach((r) => {
-      [r.media, ...r.shots].forEach((src) => {
+      [r.media, r.overlay, ...r.shots].forEach((src) => {
         if (src && !media[src])
           fetch(src, { credentials: "same-origin" })
             .then((res) => res.blob())
@@ -170,13 +180,19 @@ function Reports({ tick, toast }: { tick: number; toast: (t: string) => void }) 
           </p>
           {r.note && <p className="mt-2 rounded-2xl bg-black/40 px-4 py-2 text-white/80">“{r.note}”</p>}
           {r.media && media[r.media] && (
-            <div className="mt-3 overflow-hidden rounded-2xl bg-black">
-              {r.media_kind === "video" ? (
-                <video src={media[r.media]} controls playsInline className="max-h-80 w-full object-contain" />
-              ) : (
-                <img src={media[r.media]} alt="reported snap" className="max-h-80 w-full object-contain" />
-              )}
-            </div>
+            <>
+              <div className="relative mt-3 overflow-hidden rounded-2xl bg-black">
+                {r.media_kind === "video" ? (
+                  <video src={media[r.media]} controls playsInline className="max-h-80 w-full object-contain" />
+                ) : (
+                  <img src={media[r.media]} alt="reported snap" className="max-h-80 w-full object-contain" />
+                )}
+                {r.overlay && media[r.overlay] && (
+                  <img src={media[r.overlay]} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
+                )}
+              </div>
+              <Proof verified={r.media_verified} who={r.reported} />
+            </>
           )}
           {r.texts.length > 0 && (
             <div className="mt-3 flex flex-col gap-1.5">
@@ -186,6 +202,7 @@ function Reports({ tick, toast }: { tick: number; toast: (t: string) => void }) 
                   <span className="ml-3 mt-0.5 text-xs text-white/40">
                     {t.group ? `in ${t.group}` : "to them directly"} · {ago(t.at)}
                   </span>
+                  <Proof verified={t.verified} who={r.reported} />
                 </div>
               ))}
             </div>

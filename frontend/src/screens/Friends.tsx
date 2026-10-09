@@ -6,6 +6,8 @@ import { Scanner } from "../components/Scanner";
 import { Avatar } from "../components/Avatar";
 import { api, FriendLists, User } from "../lib/api";
 import { buzz } from "../lib/feel";
+import { myQr, useKeys, verifyContact } from "../lib/e2e";
+import { approveCode } from "./Settings";
 
 export function Friends({
   me,
@@ -23,18 +25,31 @@ export function Friends({
   const [qr, setQr] = useState("");
   const [name, setName] = useState("");
   const [scanning, setScanning] = useState(false);
+  const keys = useKeys();
 
+  // the code carries your identity key, so adding in person also verifies you
   useEffect(() => {
-    QRCode.toDataURL(`kiks:${me.username}`, { margin: 1, width: 480, color: { dark: "#000000", light: "#00000000" } }).then(setQr);
-  }, [me.username]);
+    QRCode.toDataURL(`kiks:${me.username}${myQr()}`, { margin: 1, width: 480, color: { dark: "#000000", light: "#00000000" } }).then(setQr);
+  }, [me.username, keys.ready]);
 
   const add = async (raw: string) => {
-    const n = raw.trim().toLowerCase().replace(/^(kiks|kicksnap):/, "").replace(/^@/, "");
+    const [, key] = raw.trim().split("#");
+    const n = raw.trim().split("#")[0].toLowerCase().replace(/^(kiks|kicksnap):/, "").replace(/^@/, "");
     if (!n) return;
     try {
       const r = await api.addFriend(n);
       buzz(12);
-      toast(r.status === "friends" ? `you and @${r.username} are friends` : `request sent to @${r.username}`);
+      // scanned in person: their key from the code must match what the server hands out
+      const lists = key ? await api.friends() : null;
+      const server = lists && [...lists.friends, ...lists.outgoing].find((f) => f.username === r.username)?.key;
+      if (key && ((server && server !== key) || !(await verifyContact(r.username, key)))) {
+        toast(`⚠️ @${r.username}'s code doesn't match their key on the server`);
+        onChanged();
+        return;
+      }
+      toast(
+        (r.status === "friends" ? `you and @${r.username} are friends` : `request sent to @${r.username}`) + (key ? " · verified ✓" : "")
+      );
       setName("");
       onChanged();
     } catch (e) {
@@ -139,11 +154,8 @@ export function Friends({
                 (g) => (buzz(12), toast(`you're in ${g.name} 🎉`), onChanged()),
                 (e) => toast(e.message)
               );
-            } else if (/^(kiks|kicksnap)-link:/i.test(code)) {
-              api.linkApprove(code.replace(/^(kiks|kicksnap)-link:/i, "")).then(
-                () => toast("device added ✨"),
-                (e) => toast(e.message)
-              );
+            } else if (/^(kiks|kicksnap)-(link|keys):/i.test(code)) {
+              approveCode(code, toast);
             } else add(code);
           }}
         />

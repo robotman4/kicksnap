@@ -1,6 +1,6 @@
-# kicksnap end-to-end encryption, protocol v1
+# Kiks end-to-end encryption, protocol v1
 
-Status: implemented in the web app and server (1.0.0-beta.2). The Flutter app must implement exactly this.
+Status: implemented in the web app and server. The Flutter app must implement exactly this.
 Test vectors: [`e2e-vectors.json`](e2e-vectors.json). A Python reference implementation lives in
 [`backend/tests/e2e_ref.py`](../backend/tests/e2e_ref.py); the web implementation is
 [`frontend/src/lib/crypto.ts`](../frontend/src/lib/crypto.ts).
@@ -33,17 +33,17 @@ hkdf(ikm, salt, info)  = HKDF-SHA256(ikm, salt, info as UTF-8, length 32)
 aead_seal(key, pt)     = nonce(12, random) || AES-256-GCM(key, nonce, pt)      // ciphertext includes the tag
 aead_open(key, blob)   = AES-256-GCM-decrypt(key, blob[0:12], blob[12:])
 
-sym(ck, label)         = hkdf(ck, empty, "kicksnap/1 " + label)
+sym(ck, label)         = hkdf(ck, empty, "kiks/1 " + label)
 
 seal(pub, pt, label):                      // anonymous box to an X25519 public key
     e      = new X25519 key pair
     shared = X25519(e.priv, pub)           // reject if all 32 bytes are zero
-    key    = hkdf(shared, e.pub || pub, "kicksnap/1 " + label)
+    key    = hkdf(shared, e.pub || pub, "kiks/1 " + label)
     return e.pub(32) || aead_seal(key, pt)
 
 open(priv, pub, blob, label):              // pub = the recipient's own public key
     shared = X25519(priv, blob[0:32])
-    key    = hkdf(shared, blob[0:32] || pub, "kicksnap/1 " + label)
+    key    = hkdf(shared, blob[0:32] || pub, "kiks/1 " + label)
     return aead_open(key, blob[32:])
 ```
 
@@ -66,7 +66,7 @@ The account's identity key signs the list of its devices. Senders only encrypt t
 Signed text (lines):
 
 ```
-kicksnap/1 devices
+kiks/1 devices
 <username>
 <version>                       decimal, strictly increasing per identity key
 <device id> <b64 DK public>     one line per device, sorted by device id ascending (numeric)
@@ -84,7 +84,7 @@ changed. That is the only way a device gets added: by a device that holds the id
 ### Fingerprints and verification
 
 - Fingerprint (shown to people): hex of `SHA-256(IK public)[0:10]` in groups of 4: `a1b2 c3d4 e5f6 0718 293a`.
-- Friend QR code: `kicksnap:<username>#<b64 IK public>`. Scanning it adds the friend **and** marks their key verified
+- Friend QR code: `kiks:<username>#<b64 IK public>`. Scanning it adds the friend **and** marks their key verified
   when it matches the server's; a mismatch warns.
 - Clients pin each contact's identity key on first sight (TOFU). When it changes, they show "key changed"
   (and drop "verified") but keep working, like Signal.
@@ -101,7 +101,7 @@ For each snap or text the sender makes a fresh `ck`. The signature is per **conv
 Signed text for a snap (lines):
 
 ```
-kicksnap/1 snap
+kiks/1 snap
 <from username>
 <to>
 <sent_at>          unix seconds
@@ -116,7 +116,7 @@ kicksnap/1 snap
 Signed text for a text message (lines):
 
 ```
-kicksnap/1 text
+kiks/1 text
 <from username>
 <to>
 <sent_at>
@@ -173,7 +173,7 @@ Any failure: show it as unreadable, never as content.
 New device N, signed-in device A:
 
 1. N makes a one-time X25519 link key `L`, calls `POST /link/start {link_key: b64(L.pub)}`.
-   It shows the QR `kicksnap-link:<CODE>#<b64 L.pub>` and a 6-digit check number:
+   It shows the QR `kiks-link:<CODE>#<b64 L.pub>` and a 6-digit check number:
    `check = (first 3 bytes of SHA-256(L.pub) as big-endian int) mod 1000000`, zero-padded.
 2. A scans the QR (so `L.pub` comes from N's screen, not from the server). If the code was typed instead, A fetches
    `L.pub` from `GET /link/<CODE>/key` and asks the person to compare the check number on both screens first.
@@ -182,7 +182,7 @@ New device N, signed-in device A:
    equals the account's `identity_key`, makes its DK, publishes it, adds itself to the signed device list.
 
 A device that is signed in but has no identity key (passkey sign-in, cleared storage, an account from before E2E
-on its second device) does the same with `POST /keys/requests` and the QR `kicksnap-keys:<CODE>#<b64 L.pub>`;
+on its second device) does the same with `POST /keys/requests` and the QR `kiks-keys:<CODE>#<b64 L.pub>`;
 only another device of the same account can approve it. Or it starts a **new identity**
 (`PUT /keys/identity {replace: true}`): friends see "key changed" and the account's other devices have to be
 approved again from it.
@@ -222,7 +222,7 @@ verifies the signature with the reported user's identity key. Admins see "signed
 | `GET /reports/texts/<name>` | adds `e2e`, `key`, `to` per text |
 | `POST /reports` | adds `snap_proof`, `overlay` (file), `text_proofs` |
 
-Uploads without an envelope (clients from before E2E) get `426 update kicksnap`. Snaps and texts stored before the
+Uploads without an envelope (clients from before E2E) get `426 update Kiks`. Snaps and texts stored before the
 upgrade stay readable (`e2e: 0`) until they burn.
 
 ## Known limits

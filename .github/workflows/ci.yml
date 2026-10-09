@@ -34,6 +34,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --no-audit --no-fund
         working-directory: frontend
+      - run: npm test # E2E crypto against docs/e2e-vectors.json
+        working-directory: frontend
       - run: npm run build # tsc type check + vite build
         working-directory: frontend
 

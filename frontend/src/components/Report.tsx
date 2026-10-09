@@ -2,6 +2,7 @@ import { Check, Flag, ImagePlus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, Reason, TheirText } from "../lib/api";
 import { buzz } from "../lib/feel";
+import { openTheirTexts, SnapProof } from "../lib/e2e";
 import { Sheet } from "./Sheet";
 
 const MAX_TEXTS = 10;
@@ -22,6 +23,8 @@ export function ReportSheet({
   open,
   username,
   snap,
+  snapOverlay,
+  snapProof,
   text,
   onClose,
   onDone,
@@ -31,6 +34,9 @@ export function ReportSheet({
   username: string;
   /** the snap being looked at, sent along as evidence */
   snap?: Blob | null;
+  /** its drawing layer and the sender's signature, so admins can see it's really from them */
+  snapOverlay?: Blob | null;
+  snapProof?: SnapProof | null;
   /** a text of theirs to start with ticked (reporting from a chat bubble) */
   text?: number;
   onClose: () => void;
@@ -57,7 +63,8 @@ export function ReportSheet({
     shotsRef.current.forEach((s) => URL.revokeObjectURL(s.url));
     setShots([]);
     setTexts([]);
-    api.reportTexts(username).then(setTexts, () => {});
+    // E2E texts come encrypted; only the ones this device can open can be picked
+    api.reportTexts(username).then((t) => openTheirTexts(username, t)).then(setTexts, () => {});
   }, [open, username, text]);
 
   // free thumbnails when the sheet goes away
@@ -80,7 +87,9 @@ export function ReportSheet({
     try {
       await api.report(username, reason, note, block, {
         snap: attach ? snap : null,
-        texts: picked,
+        snapOverlay: attach ? snapOverlay : null,
+        snapProof: attach ? snapProof : null,
+        texts: texts.filter((t) => picked.includes(t.id)),
         shots: shots.map((s) => s.file),
       });
       buzz(10);
