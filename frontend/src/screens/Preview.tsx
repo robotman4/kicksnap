@@ -1,13 +1,15 @@
 import { Check, Download, Pencil, Send, Timer, Type, Undo2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
+import { Media } from "../components/Media";
 import { Sheet } from "../components/Sheet";
 import { Friend } from "../lib/api";
-import { buzz, pref, timerLabel, TIMERS } from "../lib/feel";
+import { buzz, containRect, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
 import { Capture } from "./Camera";
 
-// Everything is stored in 0..1 coordinates of the screen so the preview and the
-// sent image line up exactly, whatever the output resolution.
+// Strokes and text are stored in 0..1 coordinates of the screen. The photo is shown
+// whole (object-fit: contain), and on send they're mapped onto the full-resolution
+// image through that same rect, so nothing is cropped or upscaled.
 type Pt = [number, number];
 type Stroke = { color: string; width: number; pts: Pt[] };
 type TextStyle = "bar" | "big";
@@ -31,7 +33,7 @@ function drawStrokes(ctx: CanvasRenderingContext2D, strokes: Stroke[], w: number
   }
 }
 
-function drawLabel(ctx: CanvasRenderingContext2D, l: Label, w: number, h: number) {
+function drawLabel(ctx: CanvasRenderingContext2D, l: Label, w: number, h: number, r: Rect) {
   if (!l.text.trim()) return;
   const size = FONT[l.style] * h;
   ctx.textAlign = "center";
@@ -40,44 +42,57 @@ function drawLabel(ctx: CanvasRenderingContext2D, l: Label, w: number, h: number
     ctx.font = `600 ${size}px system-ui, -apple-system, sans-serif`;
     const bh = size * 2;
     ctx.fillStyle = "rgba(0,0,0,.55)";
-    ctx.fillRect(0, l.y * h - bh / 2, w, bh);
+    ctx.fillRect(r.x, l.y * h - bh / 2, r.w, bh);
     ctx.fillStyle = "#fff";
-    ctx.fillText(l.text, w / 2, l.y * h, w * 0.94);
+    ctx.fillText(l.text, r.x + r.w / 2, l.y * h, r.w * 0.94);
   } else {
     ctx.font = `900 ${size}px system-ui, -apple-system, sans-serif`;
     ctx.lineWidth = size * 0.14;
     ctx.strokeStyle = l.color === "#000000" ? "#fff" : "#000";
-    ctx.strokeText(l.text, l.x * w, l.y * h, w * 0.94);
+    ctx.strokeText(l.text, l.x * w, l.y * h, r.w * 0.94);
     ctx.fillStyle = l.color;
-    ctx.fillText(l.text, l.x * w, l.y * h, w * 0.94);
+    ctx.fillText(l.text, l.x * w, l.y * h, r.w * 0.94);
   }
 }
 
-/** Bake media + drawing + text into what actually gets sent. */
-async function compose(capture: Capture, strokes: Stroke[], label: Label | null) {
-  const h = Math.min(1920, Math.round(window.innerHeight * 2));
-  const w = Math.round((h * window.innerWidth) / window.innerHeight);
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  const ctx = c.getContext("2d")!;
+const MAX_SIDE = 4096;
+
+/**
+ * Bake drawing + text into what gets sent, at the media's own resolution.
+ * Photos come out as one JPEG; videos keep their file and get a PNG layer the same size.
+ */
+async function compose(capture: Capture, dims: { w: number; h: number }, strokes: Stroke[], label: Label | null) {
   const decorated = strokes.length > 0 || !!label?.text.trim();
+  // Photos always get re-encoded: that also strips EXIF (GPS etc.) from gallery picks.
+  if (capture.kind === "video" && !decorated) return { file: capture.blob, overlay: null };
+
+  const fit = Math.min(1, MAX_SIDE / Math.max(dims.w, dims.h));
+  const W = Math.round(dims.w * fit);
+  const H = Math.round(dims.h * fit);
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d")!;
 
   if (capture.kind === "photo") {
     const img = new Image();
     img.src = capture.url;
     await img.decode();
-    // same crop as object-fit: cover
-    const scale = Math.max(w / img.width, h / img.height);
-    ctx.drawImage(img, (w - img.width * scale) / 2, (h - img.height * scale) / 2, img.width * scale, img.height * scale);
-  } else if (!decorated) {
-    return { file: capture.blob, overlay: null };
+    ctx.drawImage(img, 0, 0, W, H);
   }
-  drawStrokes(ctx, strokes, w, h);
-  if (label) drawLabel(ctx, label, w, h);
+  // screen px -> image px, through the rect the media is shown in
+  const sw = window.innerWidth;
+  const sh = window.innerHeight;
+  const r = containRect(dims.w, dims.h, sw, sh);
+  const k = W / r.w;
+  ctx.setTransform(k, 0, 0, k, -r.x * k, -r.y * k);
+  drawStrokes(ctx, strokes, sw, sh);
+  if (label) drawLabel(ctx, label, sw, sh, r);
 
-  const out = (type: string) => new Promise<Blob>((ok) => c.toBlob((b) => ok(b!), type, 0.9));
-  return capture.kind === "photo" ? { file: await out("image/jpeg"), overlay: null } : { file: capture.blob, overlay: await out("image/png") };
+  const out = (type: string, q?: number) => new Promise<Blob>((ok) => c.toBlob((b) => ok(b!), type, q));
+  return capture.kind === "photo"
+    ? { file: await out("image/jpeg", 0.92), overlay: null }
+    : { file: capture.blob, overlay: await out("image/png") };
 }
 
 /** After the shutter: doodle, add text, pick people, send. */
@@ -104,6 +119,8 @@ export function Preview({
   const [picking, setPicking] = useState(false);
   const [to, setTo] = useState<string[]>(preselect);
   const [sending, setSending] = useState(false);
+  const [dims, setDims] = useState({ w: 0, h: 0 });
+  const rect = containRect(dims.w, dims.h);
   const canvas = useRef<HTMLCanvasElement>(null);
   const drawing = useRef<Stroke | null>(null);
   const textInput = useRef<HTMLInputElement>(null);
@@ -151,7 +168,9 @@ export function Preview({
       setLabel({ ...label, style: label.style === "bar" ? "big" : "bar" });
       return;
     }
-    setLabel((l) => l ?? { text: "", style: "bar", color: ink, x: 0.5, y: 0.62 });
+    // start text in the lower part of the photo itself, not on the blurred fill
+    const y = (rect.y + rect.h * 0.75) / window.innerHeight;
+    setLabel((l) => l ?? { text: "", style: "bar", color: ink, x: 0.5, y });
     setMode("text");
   };
 
@@ -174,7 +193,7 @@ export function Preview({
     if (!recipients.length || sending) return;
     setSending(true);
     try {
-      const { file, overlay } = await compose(capture, strokes, label);
+      const { file, overlay } = await compose(capture, dims, strokes, label);
       await onSend(file, overlay, recipients, seconds);
     } finally {
       setSending(false);
@@ -182,7 +201,7 @@ export function Preview({
   };
 
   const save = async () => {
-    const { file, overlay } = await compose(capture, strokes, label);
+    const { file, overlay } = await compose(capture, dims, strokes, label);
     for (const [blob, ext] of [[file, capture.kind === "video" ? "webm" : "jpg"], [overlay, "png"]] as const) {
       if (!blob) continue;
       const a = document.createElement("a");
@@ -195,7 +214,7 @@ export function Preview({
 
   const labelStyle = (l: Label): React.CSSProperties =>
     l.style === "bar"
-      ? { top: `${l.y * 100}%`, left: 0, right: 0, fontSize: `${FONT.bar * 100}vh`, transform: "translateY(-50%)" }
+      ? { top: `${l.y * 100}%`, left: rect.x, width: rect.w, fontSize: `${FONT.bar * 100}vh`, transform: "translateY(-50%)" }
       : {
           top: `${l.y * 100}%`,
           left: `${l.x * 100}%`,
@@ -208,18 +227,7 @@ export function Preview({
 
   return (
     <div className="fixed inset-0 z-30 animate-[pop_.25s_ease-out] touch-none bg-black text-white" data-nodrag>
-      {capture.kind === "photo" ? (
-        <img src={capture.url} className="absolute inset-0 h-full w-full object-cover" alt="" />
-      ) : (
-        <video
-          src={capture.url}
-          autoPlay
-          loop
-          playsInline
-          className="absolute inset-0 h-full w-full object-cover"
-          style={{ transform: capture.mirrored ? "scaleX(-1)" : undefined }}
-        />
-      )}
+      <Media src={capture.url} kind={capture.kind} loop onDims={setDims} />
 
       <canvas
         ref={canvas}

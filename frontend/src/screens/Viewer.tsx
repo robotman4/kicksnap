@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
+import { Media } from "../components/Media";
 import { api, Chat } from "../lib/api";
 import { ago, buzz } from "../lib/feel";
 
@@ -67,12 +68,9 @@ export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string
       }}
     >
       {!url && <div className="absolute inset-0 grid place-items-center"><div className="h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-accent" /></div>}
-      {url && snap.kind === "photo" && <img src={url} alt="" className="absolute inset-0 h-full w-full object-cover" />}
-      {url && snap.kind === "video" && (
-        <video src={url} autoPlay playsInline className="absolute inset-0 h-full w-full object-cover" onEnded={next} />
-      )}
+      {url && <Media src={url} kind={snap.kind} onEnded={next} />}
 
-      {url && overlay && <img src={overlay} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-cover" />}
+      {url && overlay && <img src={overlay} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-contain" />}
 
       <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/50 to-transparent px-3 pb-8 pt-[max(env(safe-area-inset-top),10px)]">
         <div className="flex gap-1">

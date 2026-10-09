@@ -4,7 +4,8 @@ Self-hosted snap app. Open, snap, send. Snaps burn after they're viewed.
 
 ## What it feels like
 
-- **Opens on the camera.** Tap the shutter for a photo, hold it for up to 10s of video. Double-tap to flip.
+- **Opens on the camera.** Tap the shutter for a photo, hold it for up to 10s of video. Tap to focus, double-tap to flip.
+  Photos are full-resolution stills (the whole sensor frame, nothing cropped).
 - **Swipe, don't navigate.** Swipe right for chats, left for friends. No menus.
 - **Snap, then play.** Draw on it in 9 colours, add text (tap T again for big outlined text), drag it around.
 - **Send.** Tap the timer for 3s / 5s / 10s / ∞, hit send, tap faces.

@@ -54,3 +54,12 @@ export const pref = {
 
 export const TIMERS = [3, 5, 10, 0] as const;
 export const timerLabel = (s: number) => (s === 0 ? "∞" : `${s}s`);
+
+export type Rect = { x: number; y: number; w: number; h: number };
+
+/** Where object-fit: contain puts media of size nw×nh inside a W×H box. */
+export function containRect(nw: number, nh: number, W = window.innerWidth, H = window.innerHeight): Rect {
+  if (!nw || !nh) return { x: 0, y: 0, w: W, h: H };
+  const s = Math.min(W / nw, H / nh);
+  return { x: (W - nw * s) / 2, y: (H - nh * s) / 2, w: nw * s, h: nh * s };
+}

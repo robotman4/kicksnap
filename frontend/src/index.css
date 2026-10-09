@@ -37,6 +37,12 @@ input {
   from { transform: scale(1.04); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
+@keyframes focus {
+  0% { transform: translate(-50%, -50%) scale(1.6); opacity: 0; }
+  25% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(.9); opacity: 0; }
+}
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
   20%, 60% { transform: translateX(-10px); }

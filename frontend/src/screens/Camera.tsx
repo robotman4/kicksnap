@@ -2,9 +2,45 @@ import { Images, MessageCircle, RefreshCcw, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Friend } from "../lib/api";
-import { buzz, pref } from "../lib/feel";
+import { buzz, containRect, pref } from "../lib/feel";
 
-export type Capture = { blob: Blob; kind: "photo" | "video"; url: string; mirrored: boolean };
+export type Capture = { blob: Blob; kind: "photo" | "video"; url: string };
+
+// Ask for a big 4:3 stream: 4:3 is the sensor's native shape, so this is the full
+// field of view. Browsers pick the closest mode the camera really has.
+// resizeMode "none" asks for a native mode rather than a cropped/scaled one.
+const STREAM = { width: { ideal: 3264 }, height: { ideal: 2448 }, aspectRatio: { ideal: 4 / 3 }, resizeMode: { ideal: "none" } } as MediaTrackConstraints;
+const VIDEO_BPS = 6_000_000; // keeps a 10s clip around 7-8 MB
+
+// Focus/zoom constraints aren't in the DOM typings yet.
+type CamCaps = MediaTrackCapabilities & { focusMode?: string[]; pointsOfInterest?: unknown };
+type ImageCaptureT = { takePhoto(o?: { imageWidth?: number; imageHeight?: number }): Promise<Blob>; getPhotoCapabilities(): Promise<{ imageWidth?: { max: number }; imageHeight?: { max: number } }> };
+declare global {
+  // eslint-disable-next-line no-var
+  var ImageCapture: { new (track: MediaStreamTrack): ImageCaptureT } | undefined;
+}
+
+async function setFocus(track: MediaStreamTrack, mode: "continuous" | "single-shot", point?: { x: number; y: number }) {
+  const caps = (track.getCapabilities?.() ?? {}) as CamCaps;
+  if (!caps.focusMode?.includes(mode)) return false;
+  const c: Record<string, unknown> = { focusMode: mode };
+  if (point && caps.pointsOfInterest !== undefined) c.pointsOfInterest = [point];
+  await track.applyConstraints({ advanced: [c as MediaTrackConstraintSet] }).catch(() => {});
+  return true;
+}
+
+/** Re-encode a blob mirrored, for selfies taken through ImageCapture. */
+async function mirror(blob: Blob): Promise<Blob> {
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement("canvas");
+  c.width = bmp.width;
+  c.height = bmp.height;
+  const ctx = c.getContext("2d")!;
+  ctx.translate(c.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(bmp, 0, 0);
+  return new Promise((ok) => c.toBlob((b) => ok(b ?? blob), "image/jpeg", 0.92));
+}
 
 const MAX_VIDEO_MS = 10_000;
 const HOLD_MS = 220;
@@ -32,6 +68,8 @@ export function Camera({
   onSettings: () => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
+  const backdrop = useRef<HTMLVideoElement>(null);
+  const [focusAt, setFocusAt] = useState<{ x: number; y: number; n: number } | null>(null);
   const stream = useRef<MediaStream | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const holdTimer = useRef<number>();
@@ -51,12 +89,11 @@ export function Camera({
   const start = useCallback(async () => {
     stop();
     try {
-      const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: facing, width: { ideal: 1080 }, height: { ideal: 1920 } },
-        audio: false,
-      });
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, ...STREAM }, audio: false });
       stream.current = s;
       if (video.current) video.current.srcObject = s;
+      if (backdrop.current) backdrop.current.srcObject = s;
+      setFocus(s.getVideoTracks()[0], "continuous");
       setDenied(false);
     } catch {
       setDenied(true);
@@ -82,22 +119,59 @@ export function Camera({
     setFacing(next);
   };
 
-  const photo = () => {
+  /** Last resort: copy the current preview frame at full stream resolution. */
+  const grabFrame = (v: HTMLVideoElement) =>
+    new Promise<Blob | null>((ok) => {
+      const c = document.createElement("canvas");
+      c.width = v.videoWidth;
+      c.height = v.videoHeight;
+      const ctx = c.getContext("2d")!;
+      if (mirrored) {
+        ctx.translate(c.width, 0);
+        ctx.scale(-1, 1);
+      }
+      ctx.drawImage(v, 0, 0);
+      c.toBlob(ok, "image/jpeg", 0.92);
+    });
+
+  const photo = async () => {
     const v = video.current;
-    if (!v || !v.videoWidth) return;
-    const c = document.createElement("canvas");
-    c.width = v.videoWidth;
-    c.height = v.videoHeight;
-    const ctx = c.getContext("2d")!;
-    if (mirrored) {
-      ctx.translate(c.width, 0);
-      ctx.scale(-1, 1);
-    }
-    ctx.drawImage(v, 0, 0);
+    const track = stream.current?.getVideoTracks()[0];
+    if (!v || !v.videoWidth || !track) return;
     setFlash(true);
     setTimeout(() => setFlash(false), 120);
     buzz(12);
-    c.toBlob((blob) => blob && onCapture({ blob, kind: "photo", url: URL.createObjectURL(blob), mirrored: false }), "image/jpeg", 0.9);
+    let blob: Blob | null = null;
+    // A real still from the sensor (full resolution, autofocused) where the browser
+    // supports it (Chrome/Android). Safari doesn't, so it falls back to the frame.
+    if (globalThis.ImageCapture) {
+      try {
+        const ic = new globalThis.ImageCapture(track);
+        const caps = await ic.getPhotoCapabilities().catch(() => null);
+        const max = caps?.imageWidth ? { imageWidth: caps.imageWidth.max } : undefined;
+        // some devices reject an explicit size; the default is still a full still
+        blob = await ic.takePhoto(max).catch(() => ic.takePhoto());
+        if (mirrored) blob = await mirror(blob);
+      } catch {
+        blob = null;
+      }
+    }
+    blob ??= await grabFrame(v);
+    if (blob) onCapture({ blob, kind: "photo", url: URL.createObjectURL(blob) });
+  };
+
+  const tapFocus = (e: React.MouseEvent) => {
+    const track = stream.current?.getVideoTracks()[0];
+    const v = video.current;
+    if (!track || !v) return;
+    // tap point -> 0..1 in the frame (which is letterboxed with object-contain)
+    const r = containRect(v.videoWidth, v.videoHeight, v.clientWidth, v.clientHeight);
+    let x = (e.clientX - r.x) / r.w;
+    const y = (e.clientY - r.y) / r.h;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    if (mirrored) x = 1 - x;
+    setFocusAt({ x: e.clientX, y: e.clientY, n: Date.now() });
+    setFocus(track, "single-shot", { x, y }).then((ok) => ok && setTimeout(() => setFocus(track, "continuous"), 2500));
   };
 
   const startRecording = async () => {
@@ -107,13 +181,13 @@ export function Camera({
     const mic = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
     mic?.getAudioTracks().forEach((t) => tracks.push(t));
     const mime = pickMime();
-    const rec = new MediaRecorder(new MediaStream(tracks), mime ? { mimeType: mime } : undefined);
+    const rec = new MediaRecorder(new MediaStream(tracks), { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: VIDEO_BPS });
     const chunks: Blob[] = [];
     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     rec.onstop = () => {
       mic?.getTracks().forEach((t) => t.stop());
       const blob = new Blob(chunks, { type: rec.mimeType || "video/webm" });
-      if (blob.size) onCapture({ blob, kind: "video", url: URL.createObjectURL(blob), mirrored });
+      if (blob.size) onCapture({ blob, kind: "video", url: URL.createObjectURL(blob) });
     };
     rec.start();
     recorder.current = rec;
@@ -152,28 +226,47 @@ export function Camera({
     const f = e.target.files?.[0];
     e.target.value = "";
     if (!f) return;
-    onCapture({ blob: f, kind: f.type.startsWith("video") ? "video" : "photo", url: URL.createObjectURL(f), mirrored: false });
+    onCapture({ blob: f, kind: f.type.startsWith("video") ? "video" : "photo", url: URL.createObjectURL(f) });
   };
 
   return (
     <div
       className="relative h-full w-full overflow-hidden bg-black"
       onClick={(e) => {
-        // double tap anywhere on the viewfinder flips the camera
-        if (e.target !== e.currentTarget && e.target !== video.current) return;
+        // tap to focus, double tap anywhere on the viewfinder flips the camera
+        if (e.target !== e.currentTarget && e.target !== video.current && e.target !== backdrop.current) return;
         const t = Date.now();
         if (t - lastTap.current < 300) flip();
+        else tapFocus(e);
         lastTap.current = t;
       }}
     >
+      {/* the whole frame, uncropped, on a blurred copy of itself */}
+      <video
+        ref={backdrop}
+        autoPlay
+        playsInline
+        muted
+        aria-hidden
+        className="absolute inset-0 h-full w-full scale-110 object-cover opacity-50 blur-2xl"
+        style={{ transform: mirrored ? "scaleX(-1.1) scaleY(1.1)" : undefined }}
+      />
       <video
         ref={video}
         autoPlay
         playsInline
         muted
-        className="absolute inset-0 h-full w-full object-cover"
+        className="absolute inset-0 h-full w-full object-contain"
         style={{ transform: mirrored ? "scaleX(-1)" : undefined }}
       />
+
+      {focusAt && (
+        <div
+          key={focusAt.n}
+          className="pointer-events-none absolute h-20 w-20 -translate-x-1/2 -translate-y-1/2 animate-[focus_.9s_ease-out_forwards] rounded-full border-4 border-accent"
+          style={{ left: focusAt.x, top: focusAt.y }}
+        />
+      )}
 
       {denied && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-gradient-to-b from-zinc-900 to-black px-10 text-center text-white">
