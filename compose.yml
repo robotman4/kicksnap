@@ -8,6 +8,8 @@ services:
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
       RP_ID: ${RP_ID:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-https://github.com/robotman4/kicksnap}
+      # reverse proxy address(es) uvicorn trusts for X-Forwarded-For/-Proto; see docs/deploy.md
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     volumes:
       - kicksnap-data:/data
     ports:

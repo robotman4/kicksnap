@@ -31,18 +31,14 @@ docker compose up -d --build
 
 Open http://localhost:8080.
 
-Browsers only give camera access on `https://` or `localhost`. To use it from a phone, put it behind a TLS
-reverse proxy. Caddy, for example:
+Browsers only give camera access, passkeys and push on `https://` or `localhost`, so to use it from a phone put
+it behind a TLS reverse proxy (Caddy, Traefik, Pangolin, nginx...). Proxy examples, backups and upgrades are in
+[docs/deploy.md](docs/deploy.md).
 
-```caddyfile
-snap.example.com {
-    reverse_proxy kicksnap:8000
-}
-```
+Data (SQLite + media) lives in the `kicksnap-data` volume at `/data`. Back up `kicksnap.db` and `vapid.pem`:
+`docker compose exec -T kicksnap python -m app.admin backup --keep 14`.
 
-WebSockets (`/ws`) pass through Caddy with no extra config.
-
-Data (SQLite + media) lives in the `kicksnap-data` volume at `/data`.
+Release images are published as `ghcr.io/robotman4/kicksnap:<version>` (see [CHANGELOG.md](CHANGELOG.md)).
 
 ### Notifications
 
@@ -108,6 +104,9 @@ DATA_DIR=./data uvicorn app.main:app --reload
 
 # web on :5173, proxies /api and /ws to :8000
 cd frontend && npm install && npm run dev
+
+# tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest
 ```
 
 ## API

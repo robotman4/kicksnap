@@ -26,11 +26,14 @@ proxy with a real certificate.
 
 - Keep pull requests focused on one thing, and describe what a user would see before and after.
 - `npm run build` in `frontend/` must pass (it type-checks).
-- There's no automated test suite in the repo yet. Say in the PR how you tested, and include screenshots for UI
-  changes, ideally from a phone.
+- `cd backend && pip install -r requirements-dev.txt && python -m pytest` must pass. CI runs it, the frontend
+  build and an image smoke test on every pull request. Add a test in `backend/tests/` for API changes.
+- Say in the PR how you tested on a real device, and include screenshots for UI changes, ideally from a phone.
 - API changes: add to `/api/v1` without breaking existing clients. A breaking change needs a new version
   (`/api/v2`) next to the old one. See `backend/app/api.py`.
-- Database changes go in `backend/app/db.py` and must migrate an existing database in place.
+- Database changes go in `backend/app/db.py`. New tables and indexes: add them to `SCHEMA`. New columns or data
+  fixes: append a step to `MIGRATIONS` (never edit or reorder an existing one); `PRAGMA user_version` tracks
+  which have run. `tests/test_db.py` checks an old database still upgrades.
 
 ## Style
 

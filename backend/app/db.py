@@ -185,24 +185,72 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+# --- migrations ---------------------------------------------------------------
+#
+# SCHEMA above is the current shape and is safe to re-run (IF NOT EXISTS), so new tables
+# and indexes only need adding there. Anything SCHEMA can't do to an existing database
+# (new columns, data fixes) goes here as a numbered step: append, never edit or reorder.
+# PRAGMA user_version records how many have run. A fresh database gets SCHEMA and skips them.
+
+
+def _columns(conn, table: str) -> set[str]:
+    return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _m1_groups_and_admin(conn) -> None:
+    """Columns added before migrations existed: snaps.group_id, users admin/suspension/reason."""
+    if "group_id" not in _columns(conn, "snaps"):
+        conn.execute("ALTER TABLE snaps ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE")
+    ucols = _columns(conn, "users")
+    for col, ddl in [("is_admin", "INTEGER NOT NULL DEFAULT 0"), ("suspended_at", "INTEGER"), ("suspended_until", "INTEGER"), ("suspend_reason", "TEXT")]:
+        if col not in ucols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
+
+
+MIGRATIONS = [_m1_groups_and_admin]
+RESERVED = ("admin", "root", "support", "kicksnap", "moderator", "mod", "help", "system")
+
+
+def schema_version(conn) -> int:
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
 def init() -> None:
     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
     with connect() as conn:
-        # databases from before groups: add the column before the schema (and its FK) runs
-        cols = {r["name"] for r in conn.execute("PRAGMA table_info(snaps)")}
-        if cols and "group_id" not in cols:
-            conn.execute("ALTER TABLE snaps ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE")
-        ucols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-        for col, ddl in [("is_admin", "INTEGER NOT NULL DEFAULT 0"), ("suspended_at", "INTEGER"), ("suspended_until", "INTEGER"), ("suspend_reason", "TEXT")]:
-            if ucols and col not in ucols:
-                conn.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
+        fresh = not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'users'").fetchone()
         fresh_reserved = not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'reserved_usernames'").fetchone()
+        if not fresh:
+            # migrations run before SCHEMA, whose indexes may need their columns
+            for n in range(schema_version(conn), len(MIGRATIONS)):
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    MIGRATIONS[n](conn)
+                    conn.execute(f"PRAGMA user_version = {n + 1}")
+                    conn.execute("COMMIT")
+                except BaseException:
+                    conn.execute("ROLLBACK")
+                    raise
         conn.executescript(SCHEMA)
+        if fresh:
+            conn.execute(f"PRAGMA user_version = {len(MIGRATIONS)}")
         if fresh_reserved:  # seeded once; admins can remove them later
             conn.executemany(
                 "INSERT OR IGNORE INTO reserved_usernames (name, reason, created_at, created_by) VALUES (?, 'reserved', strftime('%s','now'), 'system')",
-                [(n,) for n in ("admin", "root", "support", "kicksnap", "moderator", "mod", "help", "system")],
+                [(n,) for n in RESERVED],
             )
+
+
+def backup(dest: Path) -> None:
+    """Consistent copy of the live database (safe while the app runs, unlike cp with WAL)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    src = connect()
+    out = sqlite3.connect(dest)
+    try:
+        src.backup(out)
+    finally:
+        out.close()
+        src.close()
 
 
 _local = threading.local()

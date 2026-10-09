@@ -2,7 +2,7 @@
   "name": "kicksnap",
   "private": true,
   "license": "AGPL-3.0-or-later",
-  "version": "0.1.0",
+  "version": "1.0.0-beta.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
