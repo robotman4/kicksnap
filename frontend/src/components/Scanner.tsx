@@ -2,12 +2,30 @@ import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 declare global {
-  // Chrome/Android ship this; Safari doesn't yet, so we fall back to typing the code.
+  // Chrome/Android ship this; Safari doesn't, so there we decode frames with jsQR.
   // eslint-disable-next-line no-var
   var BarcodeDetector: { new (o: { formats: string[] }): { detect(src: CanvasImageSource): Promise<{ rawValue: string }[]> } } | undefined;
 }
 
-export const canScan = () => typeof globalThis.BarcodeDetector !== "undefined";
+type Detect = (v: HTMLVideoElement) => Promise<string | undefined>;
+
+/** Native detector when the browser has one, otherwise jsQR on a downscaled frame. */
+async function makeDetector(): Promise<Detect> {
+  if (globalThis.BarcodeDetector) {
+    const d = new globalThis.BarcodeDetector({ formats: ["qr_code"] });
+    return async (v) => (await d.detect(v).catch(() => []))[0]?.rawValue;
+  }
+  const { default: jsQR } = await import("jsqr");
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  return async (v) => {
+    const scale = Math.min(1, 640 / v.videoWidth);
+    const w = (canvas.width = Math.round(v.videoWidth * scale));
+    const h = (canvas.height = Math.round(v.videoHeight * scale));
+    ctx.drawImage(v, 0, 0, w, h);
+    return jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "dontInvert" })?.data;
+  };
+}
 
 /** Full-screen QR scanner with a "type it instead" fallback. Accepts anything starting with kicksnap. */
 export function Scanner({ hint, onClose, onCode }: { hint: string; onClose: () => void; onCode: (c: string) => void }) {
@@ -15,30 +33,34 @@ export function Scanner({ hint, onClose, onCode }: { hint: string; onClose: () =
   const cb = useRef({ onClose, onCode });
   cb.current = { onClose, onCode };
   const [typed, setTyped] = useState("");
-  const [typing, setTyping] = useState(!canScan());
+  const [typing, setTyping] = useState(false);
 
   useEffect(() => {
     if (typing) return;
     let stream: MediaStream | null = null;
     let raf = 0;
-    const detector = new globalThis.BarcodeDetector!({ formats: ["qr_code"] });
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(
-      (s) => {
+    let dead = false;
+    Promise.all([makeDetector(), navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })]).then(
+      ([detect, s]) => {
         stream = s;
+        if (dead) return s.getTracks().forEach((t) => t.stop());
         if (!video.current) return;
         video.current.srcObject = s;
         const tick = async () => {
+          if (dead) return;
           if (video.current?.readyState === 4) {
-            const [hit] = await detector.detect(video.current).catch(() => []);
-            if (hit?.rawValue.toLowerCase().startsWith("kicksnap")) return cb.current.onCode(hit.rawValue);
+            const hit = await detect(video.current);
+            if (dead) return;
+            if (hit?.toLowerCase().startsWith("kicksnap")) return cb.current.onCode(hit);
           }
           raf = requestAnimationFrame(tick);
         };
         tick();
       },
-      () => setTyping(true)
+      () => !dead && setTyping(true)
     );
     return () => {
+      dead = true;
       cancelAnimationFrame(raf);
       stream?.getTracks().forEach((t) => t.stop());
     };
