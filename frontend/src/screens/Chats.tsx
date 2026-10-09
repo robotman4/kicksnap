@@ -1,4 +1,4 @@
-import { Camera as CameraIcon, Plus } from "lucide-react";
+import { MessageCircle, Plus } from "lucide-react";
 import { Avatar } from "../components/Avatar";
 import { PullToRefresh } from "../components/PullToRefresh";
 import { Chat, ChatState } from "../lib/api";
@@ -12,7 +12,7 @@ const STATE: Record<ChatState, { label: string; mark: "fill" | "line" | "arrow" 
   received: { label: "received", mark: "line" },
   delivered: { label: "delivered", mark: "arrow" },
   opened: { label: "opened", mark: "arrowline" },
-  none: { label: "tap to chat", mark: null },
+  none: { label: "tap to snap", mark: null },
 };
 
 function Mark({ kind, color }: { kind: (typeof STATE)[ChatState]["mark"]; color: string }) {
@@ -88,8 +88,8 @@ export function Chats({
           return (
             <div key={c.key} className="flex items-center gap-1 pr-3">
               <button
-                // new snaps play first; otherwise the name opens the chat
-                onClick={() => (out?.failed ? out.retry() : c.snaps.length ? onOpen(c) : onTalk(c))}
+                // new snaps play first; otherwise straight to the camera, aimed at them
+                onClick={() => (out?.failed ? out.retry() : c.snaps.length ? onOpen(c) : onSnapBack(c.key))}
                 className="flex min-w-0 flex-1 items-center gap-4 px-5 py-3 text-left transition active:bg-white/5"
               >
                 <Avatar name={c.name} color={c.color} size={52} group={c.group} />
@@ -109,11 +109,12 @@ export function Chats({
                 </div>
               </button>
               <button
-                onClick={() => onSnapBack(c.key)}
-                aria-label={`snap ${c.name}`}
-                className="grid h-11 w-11 place-items-center rounded-full text-white/60 active:scale-90 active:bg-white/10"
+                onClick={() => onTalk(c)}
+                aria-label={`chat with ${c.name}`}
+                className="relative grid h-12 w-12 place-items-center rounded-full text-white/60 active:scale-90 active:bg-white/10"
               >
-                <CameraIcon size={22} />
+                <MessageCircle size={24} />
+                {c.unread > 0 && <span className="absolute right-2 top-2 h-3 w-3 rounded-full ring-2 ring-black" style={{ background: CHAT_BLUE }} />}
               </button>
             </div>
           );
