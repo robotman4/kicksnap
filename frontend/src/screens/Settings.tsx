@@ -1,4 +1,4 @@
-import { Bell, BellOff, Check, Fingerprint, LogOut, QrCode, Smartphone, X } from "lucide-react";
+import { Bell, BellOff, Check, Fingerprint, LogOut, QrCode, RefreshCw, Smartphone, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Scanner } from "../components/Scanner";
@@ -7,6 +7,7 @@ import { api, Device, User } from "../lib/api";
 import { ACCENTS, ago, buzz, onColor, timerLabel, TIMERS } from "../lib/feel";
 import { addPasskey, passkeysSupported } from "../lib/passkey";
 import { disablePush, enablePush, pushState, PushState } from "../lib/push";
+import { reloadApp, updateAvailable } from "../lib/update";
 
 export function Settings({
   open,
@@ -31,6 +32,7 @@ export function Settings({
   const [passkeys, setPasskeys] = useState(0);
   const [scanning, setScanning] = useState(false);
   const [push, setPush] = useState<PushState>("unsupported");
+  const [fresh, setFresh] = useState(false);
 
   const load = () =>
     api
@@ -45,6 +47,7 @@ export function Settings({
     if (!open) return;
     load();
     pushState().then(setPush);
+    updateAvailable().then(setFresh);
   }, [open]);
 
   const togglePush = async () => {
@@ -136,6 +139,15 @@ export function Settings({
               </button>
             ))}
           </div>
+
+          <button
+            onClick={() => (buzz(8), reloadApp())}
+            className={`mt-8 flex w-full items-center justify-center gap-2 rounded-full py-5 text-lg font-bold active:scale-[.98] ${
+              fresh ? "bg-accent text-black" : "bg-white/5 text-white/60"
+            }`}
+          >
+            {fresh ? <Sparkles size={22} /> : <RefreshCw size={22} />} {fresh ? "update available" : "refresh app"}
+          </button>
 
           <Label>signed in on</Label>
           {devices.map((d) => (

@@ -51,7 +51,7 @@ export function Friends({
       <PullToRefresh onRefresh={onChanged} className="flex-1 px-5 pb-24">
         {/* your code */}
         <div className="flex items-center gap-5 rounded-[2rem] bg-accent p-5 text-black">
-          <div className="h-28 w-28 shrink-0 rounded-2xl bg-accent">{qr && <img src={qr} alt="your code" className="h-full w-full" />}</div>
+          <div className="h-28 w-28 shrink-0 rounded-2xl bg-accent">{qr && <img src={qr} alt="your code" draggable={false} className="pointer-events-none h-full w-full" />}</div>
           <div className="min-w-0">
             <p className="text-sm font-bold opacity-60">your code</p>
             <p className="truncate text-2xl font-black">@{me.username}</p>

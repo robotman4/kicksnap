@@ -63,7 +63,7 @@ export function PullToRefresh({ onRefresh, children, className = "" }: { onRefre
 
   const settling = !live.current.y0;
   return (
-    <div ref={box} className={`relative overflow-y-auto overscroll-contain ${className}`}>
+    <div ref={box} className={`relative overflow-y-auto overflow-x-hidden overscroll-contain ${className}`}>
       <div
         className={`pointer-events-none absolute inset-x-0 top-0 flex justify-center ${settling ? "transition-transform duration-300 ease-spring" : ""}`}
         style={{ transform: `translateY(${pull - 56}px)` }}
