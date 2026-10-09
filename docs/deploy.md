@@ -80,7 +80,9 @@ The cookie line should end with `Secure`. If it doesn't, the proxy isn't sending
 (This makes a throwaway account with no name; those are deleted after a day.) In a browser: DevTools →
 Application → Cookies → `ks_device` has the Secure box ticked.
 
-`curl https://snap.example.com/api/v1/health` shows the running version.
+`curl https://snap.example.com/api/v1/health` shows the running version, whether the database answers (503 if
+not, so it works for uptime monitors), and how many unhandled errors happened in the last hour. The errors
+themselves, with tracebacks, are in `docker compose logs kicksnap`.
 
 ## Configuration
 
@@ -92,6 +94,7 @@ Application → Cookies → `ks_device` has the Secure box ticked.
 | `RP_ID` | request host | passkey domain; set it if you serve on several hostnames |
 | `VAPID_SUBJECT` | project URL | `mailto:` or `https:` contact for push services |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | proxy address(es) to trust, see above |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
 ## Backups
 

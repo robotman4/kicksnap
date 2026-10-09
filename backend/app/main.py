@@ -9,11 +9,11 @@ from pathlib import Path
 from fastapi import (
     Depends, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, db as store
+from . import __version__, db as store, errors
 from .api import API, Unversioned, device_token
 from .auth import current_user, public, router as auth_router, suspended, user_for_token
 from .limits import limit
@@ -30,7 +30,9 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 STATIC_DIR = Path(os.getenv("STATIC_DIR", "../frontend/dist"))
 VIEW_SECONDS = {0, 3, 5, 10}
 
+errors.setup()
 app = FastAPI(title="Kicksnap", version=__version__, docs_url=f"{API}/docs", openapi_url=f"{API}/openapi.json")
+app.add_exception_handler(Exception, errors.unhandled)
 app.add_middleware(Unversioned)
 app.include_router(auth_router)
 app.include_router(push_router)
@@ -279,7 +281,11 @@ def burn_expired() -> int:
 
 async def burn_loop():
     while True:
-        burn_expired()
+        try:
+            burn_expired()
+        except Exception:  # keep burning next minute; a dead loop would keep snaps forever
+            errors.record()
+            errors.log.exception("burn loop failed")
         await asyncio.sleep(60)
 
 
@@ -291,9 +297,15 @@ async def startup():
 
 @app.get(API + "/health")
 def health():
-    with db() as conn:
-        conn.execute("SELECT 1").fetchone()
-    return {"ok": True, "api": API, "version": __version__}
+    """For Docker's HEALTHCHECK and uptime monitors: 503 if the database can't be read."""
+    out = {"ok": True, "api": API, "version": __version__, "db": "ok", **errors.summary()}
+    try:
+        with db() as conn:
+            conn.execute("SELECT COUNT(*) FROM users").fetchone()
+    except Exception as e:
+        errors.log.error("health: database check failed: %s", e)
+        return JSONResponse({**out, "ok": False, "db": "error"}, status_code=503)
+    return out
 
 
 # --- frontend ---------------------------------------------------------------

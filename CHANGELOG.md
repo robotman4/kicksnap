@@ -20,5 +20,9 @@ First beta.
 - Operator side: numbered database migrations (`PRAGMA user_version`), `app.admin backup`/`version`,
   `/api/v1/health` reports the version and checks the database, `FORWARDED_ALLOW_IPS` in compose,
   [deploy docs](docs/deploy.md).
+- Push notifications go to all of a user's devices in parallel (httpx); a slow or dead push service no longer
+  holds up the rest, and expired subscriptions are pruned.
+- Unhandled errors are logged with method and path and counted in `/api/v1/health`; `LOG_LEVEL` env var. The
+  burn loop logs and keeps going if one round fails.
 - Test suite and CI (tests, frontend build, image smoke test; version tags publish to GHCR).
 - AGPL-3.0.

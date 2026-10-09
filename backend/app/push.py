@@ -1,6 +1,6 @@
 """
 Web Push (RFC 8030) with VAPID (RFC 8292) and aes128gcm payloads (RFC 8291),
-done with `cryptography` (already here for passkeys) and urllib.
+done with `cryptography` (already here for passkeys) and httpx.
 
 Payloads never contain snap content, only "new snap from @name".
 """
@@ -12,10 +12,9 @@ import json
 import logging
 import os
 import struct
-import urllib.error
-import urllib.request
 from urllib.parse import urlparse
 
+import httpx
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
@@ -111,38 +110,51 @@ def allowed(endpoint: str) -> bool:
     return u.scheme == "https" and any(host == h or host.endswith("." + h) for h in PUSH_HOSTS)
 
 
-def _send_one(endpoint: str, p256dh: str, auth: str, payload: dict) -> int:
+_client: httpx.AsyncClient | None = None
+
+
+def client() -> httpx.AsyncClient:
+    """One pooled client for all push services, made on first use."""
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(timeout=10, limits=httpx.Limits(max_connections=100))
+    return _client
+
+
+async def _send_one(endpoint: str, p256dh: str, auth: str, payload: dict) -> int:
     u = urlparse(endpoint)
     body = encrypt(json.dumps(payload).encode(), p256dh, auth)
-    req = urllib.request.Request(endpoint, data=body, method="POST", headers={
+    headers = {
         "Content-Encoding": "aes128gcm",
         "Content-Type": "application/octet-stream",
         "TTL": str(24 * 3600),
         "Urgency": "high",
         "Topic": payload.get("tag", "kicksnap")[:32].replace(".", "-") or "kicksnap",
         "Authorization": f"vapid t={_jwt(f'{u.scheme}://{u.netloc}')}, k={b64u(_raw_public(vapid()))}",
-    })
+    }
     try:
-        with urllib.request.urlopen(req, timeout=10) as res:
-            return res.status
-    except urllib.error.HTTPError as e:
-        return e.code
-    except Exception as e:  # network trouble: keep the subscription, try next time
-        log.warning("push to %s failed: %s", u.netloc, e)
+        res = await client().post(endpoint, content=body, headers=headers)
+        return res.status_code
+    except Exception as e:  # network trouble or timeout: keep the subscription, try next time
+        log.warning("push to %s failed: %s", u.netloc, e or type(e).__name__)
         return 0
 
 
 async def notify(user_id: int, payload: dict) -> None:
-    """Fire-and-forget push to every device of a user that subscribed."""
-    with db() as conn:
-        subs = conn.execute("SELECT endpoint, p256dh, auth FROM push_subs WHERE user_id = ?", (user_id,)).fetchall()
-    for s in subs:
-        status = await asyncio.to_thread(_send_one, s["endpoint"], s["p256dh"], s["auth"], payload)
-        if status in (404, 410):  # unsubscribed or expired
+    """Fire-and-forget push to every device of a user that subscribed, all at once."""
+    try:
+        with db() as conn:
+            subs = conn.execute("SELECT endpoint, p256dh, auth FROM push_subs WHERE user_id = ?", (user_id,)).fetchall()
+        statuses = await asyncio.gather(*(_send_one(s["endpoint"], s["p256dh"], s["auth"], payload) for s in subs))
+        gone = [s["endpoint"] for s, status in zip(subs, statuses) if status in (404, 410)]  # unsubscribed or expired
+        if gone:
             with db() as conn:
-                conn.execute("DELETE FROM push_subs WHERE endpoint = ?", (s["endpoint"],))
-        elif status >= 400:
-            log.warning("push rejected with %s", status)
+                conn.executemany("DELETE FROM push_subs WHERE endpoint = ?", [(e,) for e in gone])
+        for status in statuses:
+            if status >= 400 and status not in (404, 410):
+                log.warning("push rejected with %s", status)
+    except Exception:  # runs as a background task: nobody else would see this
+        log.exception("push to user %s failed", user_id)
 
 
 # --- api --------------------------------------------------------------------
