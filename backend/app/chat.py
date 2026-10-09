@@ -11,7 +11,7 @@ import unicodedata
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from .auth import current_user, now
+from .auth import current_user, now, suspended
 from .limits import limit
 from .db import db
 from .hub import hub
@@ -84,9 +84,11 @@ def resolve(conn, me: int, key: str):
     """key -> ("u", friend row) or ("g", group row); 404 unless it's a friend or a group you're in."""
     kind, _, ident = key.partition(":")
     if kind == "u":
-        other = conn.execute("SELECT id, username, color FROM users WHERE username = ?", (ident.lower(),)).fetchone()
+        other = conn.execute("SELECT id, username, color, suspended_at, suspended_until FROM users WHERE username = ?", (ident.lower(),)).fetchone()
         if not other or not are_friends(conn, me, other["id"]):
             raise HTTPException(404, "not your friend")
+        if suspended(other):
+            raise HTTPException(404, "they're unavailable right now")
         return "u", other
     if kind == "g" and ident.isdigit():
         g = conn.execute(
@@ -152,7 +154,7 @@ def chats(user=Depends(current_user)):
     p = {"me": me}
     with db() as conn:
         friends = conn.execute(
-            """SELECT u.id, u.username, u.color FROM friendships a
+            """SELECT u.id, u.username, u.color, u.suspended_at, u.suspended_until FROM friendships a
                JOIN friendships b ON b.user_id = a.friend_id AND b.friend_id = a.user_id
                JOIN users u ON u.id = a.friend_id WHERE a.user_id = :me""",
             p,
@@ -224,11 +226,11 @@ def chats(user=Depends(current_user)):
     for f in friends:
         snaps = [{k: r[k] for k in r.keys() if k != "sender_id"} for r in new_direct.get(f["id"], [])]
         state = _friend_state(me, snaps, unread_direct.get(f["id"], (0, None)), last_snap.get(f["id"]), last_msg.get(f["id"]), their_reads.get(f["id"], 0))
-        out.append({"key": f"u:{f['username']}", "name": f["username"], "color": f["color"], "group": False, **state})
+        out.append({"key": f"u:{f['username']}", "name": f["username"], "color": f["color"], "group": False, "away": suspended(f), **state})
     for g in groups:
         snaps = [{k: r[k] for k in r.keys() if k != "group_id"} for r in new_group.get(g["id"], [])]
         state = _group_state(me, g, snaps, unread_group.get(g["id"], (0, None)), last_group.get(g["id"]))
-        out.append({"key": f"g:{g['id']}", "name": g["name"], "color": g["color"], "group": True, **state})
+        out.append({"key": f"g:{g['id']}", "name": g["name"], "color": g["color"], "group": True, "away": False, **state})
     out.sort(key=lambda c: (c["state"] != "new", -c["at"], c["name"]))
     return out
 

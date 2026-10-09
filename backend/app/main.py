@@ -14,13 +14,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import db as store
-from .auth import COOKIE, current_user, public, router as auth_router, user_for_token
+from .auth import COOKIE, current_user, public, router as auth_router, suspended, user_for_token
 from .limits import limit
 from .db import db
 from .chat import are_friends, blocked, member_ids, router as chat_router
 from .hub import hub
-from .media import burn, media_path, overlay_path
+from .media import burn, media_path, overlay_path, save_upload
 from .push import notify, router as push_router
+from .moderation import router as moderation_router
 from .safety import router as safety_router
 
 SNAP_TTL_HOURS = int(os.getenv("SNAP_TTL_HOURS", "24"))
@@ -33,6 +34,7 @@ app.include_router(auth_router)
 app.include_router(push_router)
 app.include_router(chat_router)
 app.include_router(safety_router)
+app.include_router(moderation_router)
 
 
 def now() -> int:
@@ -57,7 +59,7 @@ def update_me(body: Profile, user=Depends(current_user)):
 @app.websocket("/ws")
 async def socket(ws: WebSocket):
     user = user_for_token(ws.cookies.get(COOKIE))
-    if not user or not user["username"]:
+    if not user or not user["username"] or suspended(user):
         await ws.close(code=4401)
         return
     await ws.accept()
@@ -138,18 +140,6 @@ async def remove_friend(username: str, user=Depends(current_user)):
 
 # --- snaps ------------------------------------------------------------------
 
-async def save_upload(upload: UploadFile, dest: Path, limit: int) -> None:
-    size = 0
-    with dest.open("wb") as out:
-        while chunk := await upload.read(1024 * 1024):
-            size += len(chunk)
-            if size > limit:
-                out.close()
-                dest.unlink(missing_ok=True)
-                raise HTTPException(413, "too big")
-            out.write(chunk)
-
-
 @app.post("/api/snaps", dependencies=[Depends(limit("snap", 30, 60))])
 async def send_snap(
     file: UploadFile = File(...),
@@ -186,9 +176,9 @@ async def send_snap(
     with db() as conn:
         direct = [
             r for r in conn.execute(
-                f"SELECT id, username FROM users WHERE username IN ({','.join('?' * len(names))})", tuple(names)
+                f"SELECT id, username, suspended_at, suspended_until FROM users WHERE username IN ({','.join('?' * len(names))})", tuple(names)
             ).fetchall()
-            if are_friends(conn, me, r["id"])
+            if are_friends(conn, me, r["id"]) and not suspended(r)
         ] if names else []
         targets: list[tuple[int | None, list, str]] = [(None, direct, "")] if direct else []
         for gid in group_ids:
@@ -279,6 +269,7 @@ def burn_expired() -> int:
             burn(snap_id)
         conn.execute("DELETE FROM snaps WHERE created_at < ?", (cutoff,))
         conn.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
+        conn.execute("DELETE FROM reserved_usernames WHERE expires_at IS NOT NULL AND expires_at < ?", (now(),))
         # accounts that never picked a name
         conn.execute("DELETE FROM users WHERE username IS NULL AND created_at < ?", (now() - 86400,))
     return len(old)

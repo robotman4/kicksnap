@@ -13,7 +13,10 @@ CREATE TABLE IF NOT EXISTS users (
     id          INTEGER PRIMARY KEY,
     username    TEXT UNIQUE COLLATE NOCASE,   -- NULL until picked right after sign-up
     color       TEXT NOT NULL DEFAULT '#C6FF3D',
-    created_at  INTEGER NOT NULL
+    created_at  INTEGER NOT NULL,
+    is_admin    INTEGER NOT NULL DEFAULT 0,       -- set from the server shell: python -m app.admin grant
+    suspended_at    INTEGER,                      -- set = suspended
+    suspended_until INTEGER                       -- NULL with suspended_at set = until lifted
 );
 -- every browser/phone is a device; its secret lives in an httpOnly cookie
 CREATE TABLE IF NOT EXISTS devices (
@@ -111,6 +114,40 @@ CREATE TABLE IF NOT EXISTS reads (
     PRIMARY KEY (user_id, chat)
 );
 CREATE INDEX IF NOT EXISTS reads_chat ON reads(chat);
+-- reports go to the admins of this server; no email, no scores
+CREATE TABLE IF NOT EXISTS reports (
+    id            INTEGER PRIMARY KEY,
+    reporter_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reporter_name TEXT NOT NULL,
+    reported_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reported_name TEXT NOT NULL,
+    reason        TEXT NOT NULL,
+    note          TEXT NOT NULL DEFAULT '',
+    media         TEXT,            -- file in MEDIA_DIR/reports, only if the reporter attached the snap
+    media_mime    TEXT,
+    was_friend    INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL,
+    closed_at     INTEGER,
+    closed_by     TEXT,
+    outcome       TEXT              -- dismissed | suspended | deleted
+);
+CREATE INDEX IF NOT EXISTS reports_open ON reports(closed_at, reported_id);
+-- names nobody can register; expires_at set = a cooldown after someone deleted their account
+CREATE TABLE IF NOT EXISTS reserved_usernames (
+    name        TEXT PRIMARY KEY COLLATE NOCASE,
+    reason      TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL,
+    created_by  TEXT NOT NULL,
+    expires_at  INTEGER
+);
+CREATE TABLE IF NOT EXISTS admin_log (
+    id          INTEGER PRIMARY KEY,
+    admin       TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    target      TEXT NOT NULL,
+    detail      TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL
+);
 """
 
 
@@ -129,7 +166,17 @@ def init() -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(snaps)")}
         if cols and "group_id" not in cols:
             conn.execute("ALTER TABLE snaps ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE")
+        ucols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+        for col, ddl in [("is_admin", "INTEGER NOT NULL DEFAULT 0"), ("suspended_at", "INTEGER"), ("suspended_until", "INTEGER")]:
+            if ucols and col not in ucols:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
+        fresh_reserved = not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'reserved_usernames'").fetchone()
         conn.executescript(SCHEMA)
+        if fresh_reserved:  # seeded once; admins can remove them later
+            conn.executemany(
+                "INSERT OR IGNORE INTO reserved_usernames (name, reason, created_at, created_by) VALUES (?, 'reserved', strftime('%s','now'), 'system')",
+                [(n,) for n in ("admin", "root", "support", "kicksnap", "moderator", "mod", "help", "system")],
+            )
 
 
 _local = threading.local()

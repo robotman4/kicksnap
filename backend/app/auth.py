@@ -90,16 +90,28 @@ def any_user(ks_device: str | None = Cookie(default=None)):
     return user
 
 
+def suspended(user) -> bool:
+    return bool(user["suspended_at"]) and (user["suspended_until"] is None or user["suspended_until"] > now())
+
+
 def current_user(ks_device: str | None = Cookie(default=None)):
-    """Signed in AND has picked a username."""
+    """Signed in, has picked a username, and isn't suspended."""
     user = any_user(ks_device)
     if not user["username"]:
         raise HTTPException(409, "pick a name first")
+    if suspended(user):
+        raise HTTPException(403, "your account is suspended")
     return user
 
 
 def public(user) -> dict:
     return {"username": user["username"], "color": user["color"]}
+
+
+def name_reserved(conn, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM reserved_usernames WHERE name = ? AND (expires_at IS NULL OR expires_at > ?)", (name, now())
+    ).fetchone() is not None
 
 
 # --- new account ------------------------------------------------------------
@@ -125,7 +137,7 @@ def pick_name(body: Name, ks_device: str | None = Cookie(default=None)):
         raise HTTPException(400, "3-20 letters, numbers, _ or .")
     with db() as conn:
         taken = conn.execute("SELECT 1 FROM users WHERE username = ? AND id != ?", (name, user["id"])).fetchone()
-        if taken:
+        if taken or name_reserved(conn, name):
             raise HTTPException(409, "taken, try another")
         conn.execute("UPDATE users SET username = ? WHERE id = ?", (name, user["id"]))
     return {"username": name, "color": user["color"]}
@@ -137,14 +149,18 @@ def name_free(name: str):
     if not USERNAME_RE.match(name):
         return {"free": False, "valid": False}
     with db() as conn:
-        taken = conn.execute("SELECT 1 FROM users WHERE username = ?", (name,)).fetchone()
+        taken = conn.execute("SELECT 1 FROM users WHERE username = ?", (name,)).fetchone() or name_reserved(conn, name)
     return {"free": not taken, "valid": True}
 
 
 @router.get("/me")
 def me(ks_device: str | None = Cookie(default=None)):
     """Returns the user even before a name is picked, so the client knows where to go."""
-    return public(any_user(ks_device))
+    user = any_user(ks_device)
+    out = {**public(user), "admin": bool(user["is_admin"])}
+    if user["username"] and suspended(user):
+        out["suspended_until"] = user["suspended_until"] or 0  # 0 = until an admin lifts it
+    return out
 
 
 @router.post("/auth/logout")

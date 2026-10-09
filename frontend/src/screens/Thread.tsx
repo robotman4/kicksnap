@@ -1,6 +1,7 @@
-import { ArrowUp, Ban, Camera as CameraIcon, ChevronLeft, UserMinus } from "lucide-react";
+import { ArrowUp, Ban, Camera as CameraIcon, ChevronLeft, Flag, UserMinus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
+import { ReportSheet } from "../components/Report";
 import { Sheet } from "../components/Sheet";
 import { api, charCount, Chat, clip, MAX_CHARS, Message } from "../lib/api";
 import { buzz } from "../lib/feel";
@@ -27,6 +28,7 @@ export function Thread({
 }) {
   const [friendMenu, setFriendMenu] = useState(false);
   const [confirmBlock, setConfirmBlock] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const who = chat.key.slice(2);
   const act = (p: Promise<unknown>, done: string) =>
     p.then(
@@ -179,9 +181,27 @@ export function Thread({
             >
               <Ban size={22} /> {confirmBlock ? "tap again to block" : `block @${who}`}
             </button>
+            <button
+              onClick={() => (setFriendMenu(false), setReporting(true))}
+              className="flex items-center justify-center gap-2 rounded-full py-4 font-bold text-white/50 active:scale-[.98]"
+            >
+              <Flag size={20} /> report @{who}
+            </button>
             <p className="text-center text-sm text-white/40">Blocking unfriends you both and stops them finding you again.</p>
           </div>
         </Sheet>
+      )}
+      {!chat.group && (
+        <ReportSheet
+          open={reporting}
+          username={who}
+          onClose={() => setReporting(false)}
+          onDone={(blocked) => {
+            setReporting(false);
+            if (blocked) onGone();
+          }}
+          toast={toast}
+        />
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { Bell, BellOff, Check, Fingerprint, LogOut, QrCode, RefreshCw, Smartphone, Sparkles, Trash2, X } from "lucide-react";
+import { Bell, BellOff, Check, Fingerprint, LogOut, ShieldCheck, QrCode, RefreshCw, Smartphone, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Scanner } from "../components/Scanner";
@@ -19,6 +19,7 @@ export function Settings({
   onSeconds,
   onLogout,
   onDeleted,
+  onAdmin,
   toast,
 }: {
   open: boolean;
@@ -29,6 +30,7 @@ export function Settings({
   onSeconds: (s: number) => void;
   onLogout: () => void;
   onDeleted: () => void;
+  onAdmin: () => void;
   toast: (t: string) => void;
 }) {
   const [blocked, setBlocked] = useState<Friend[]>([]);
@@ -118,6 +120,11 @@ export function Settings({
             <Tile onClick={() => setScanning(true)} icon={<QrCode size={30} strokeWidth={2.5} />}>
               add a device
             </Tile>
+            {me.admin && (
+              <Tile onClick={onAdmin} icon={<ShieldCheck size={30} strokeWidth={2.5} />}>
+                admin
+              </Tile>
+            )}
             {passkeysSupported() && (
               <Tile onClick={passkey} icon={<Fingerprint size={30} strokeWidth={2.5} />}>
                 {passkeys ? `passkeys · ${passkeys}` : "add a passkey"}
@@ -228,7 +235,7 @@ export function Settings({
             <div className="mt-10 rounded-[2rem] bg-red-500/10 p-5">
               <p className="text-lg font-black text-red-400">This deletes @{me.username} for good.</p>
               <p className="mt-1 text-sm text-white/60">
-                Your snaps, chats, friends, devices and passkeys go from the server, and the name is free for anyone. Groups you run pass to the next member.
+                Your snaps, chats, friends, devices and passkeys go from the server. Your name is held for 30 days so nobody can pose as you, then anyone can take it. Groups you run pass to the next member.
               </p>
               <input
                 value={confirmName}

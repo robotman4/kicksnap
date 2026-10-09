@@ -89,13 +89,15 @@ export function Chats({
             <div key={c.key} className="flex items-center gap-1 pr-3">
               <button
                 // new snaps play first; otherwise straight to the camera, aimed at them
-                onClick={() => (out?.failed ? out.retry() : c.snaps.length ? onOpen(c) : onSnapBack(c.key))}
+                onClick={() => (c.away ? undefined : out?.failed ? out.retry() : c.snaps.length ? onOpen(c) : onSnapBack(c.key))}
                 className="flex min-w-0 flex-1 items-center gap-4 px-5 py-3 text-left transition active:bg-white/5"
               >
                 <Avatar name={c.name} color={c.color} size={52} group={c.group} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-lg font-bold">{c.name}</p>
-                  {out ? (
+                  {c.away ? (
+                    <p className="text-sm text-white/35">unavailable</p>
+                  ) : out ? (
                     <p className={`flex items-center gap-2 text-sm font-bold ${out.failed ? "text-red-400" : "text-accent"}`}>
                       {out.failed ? "didn't send · tap to retry" : <><Sending /> sending…</>}
                     </p>

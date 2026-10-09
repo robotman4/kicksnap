@@ -12,6 +12,7 @@ import { PickName, Welcome } from "./screens/Onboard";
 import { Preview } from "./screens/Preview";
 import { Settings } from "./screens/Settings";
 import { GroupInfo, NewGroup } from "./screens/Groups";
+import { AdminView } from "./screens/Admin";
 import { Thread } from "./screens/Thread";
 import { Viewer } from "./screens/Viewer";
 
@@ -38,6 +39,7 @@ export default function App() {
   if (booting) return <div className="h-full bg-black" />;
   if (!me) return <Welcome onIn={setMe} />;
   if (!me.username) return <PickName onDone={setMe} />;
+  if (me.suspended_until !== undefined) return <Suspended me={me} onOut={() => api.logout().finally(() => setMe(null))} />;
   return <Home me={me as User & { username: string }} setMe={setMe} />;
 }
 
@@ -53,6 +55,7 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
   const [talking, setTalking] = useState<Chat | null>(null);
   const [groupInfo, setGroupInfo] = useState<number | null>(null);
   const [making, setMaking] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   // bumps on every live event so open screens refetch
   const [tick, setTick] = useState(0);
   const [settings, setSettings] = useState(false);
@@ -63,7 +66,10 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
   const refresh = useCallback(
     () =>
       Promise.all([
-        api.chats().then(setChats).catch(() => {}),
+        api.chats().then(setChats, (e) => {
+          // suspended while the app was open: show it
+          if (e instanceof ApiError && e.status === 403) api.me().then(setMe, () => {});
+        }),
         api.friends().then(setLists).catch(() => {}),
       ]),
     []
@@ -72,6 +78,8 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
   useEffect(() => {
     refresh();
     syncPush();
+    // sign-in responses are minimal; pick up the admin flag etc.
+    api.me().then(setMe, () => {});
     // Phones drop the socket when the app is backgrounded, so catch up on return.
     const back = () => !document.hidden && refresh();
     document.addEventListener("visibilitychange", back);
@@ -208,6 +216,7 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
       {viewing && (
         <Viewer
           chat={viewing}
+          toast={setToast}
           onDone={(back) => {
             setViewing(null);
             refresh();
@@ -277,6 +286,10 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
           api.logout().finally(() => setMe(null));
         }}
         onDeleted={() => setMe(null)}
+        onAdmin={() => {
+          setSettings(false);
+          setAdminOpen(true);
+        }}
         toast={setToast}
       />
 
@@ -300,7 +313,25 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
         </div>
       )}
 
+      {adminOpen && <AdminView tick={tick} onClose={() => setAdminOpen(false)} toast={setToast} />}
+
       <Toast text={toast} onDone={() => setToast(null)} />
+    </div>
+  );
+}
+
+function Suspended({ me, onOut }: { me: User; onOut: () => void }) {
+  const until = me.suspended_until ? new Date(me.suspended_until * 1000).toLocaleDateString() : null;
+  return (
+    <div className="flex h-full flex-col justify-center gap-4 bg-black px-8 text-white">
+      <p className="text-5xl">⏸️</p>
+      <h1 className="text-4xl font-black leading-tight">@{me.username} is on a break</h1>
+      <p className="text-lg text-white/60">
+        The people running this server suspended your account{until ? ` until ${until}` : ""}. You can't send or get snaps while it lasts.
+      </p>
+      <button onClick={onOut} className="mt-6 rounded-full bg-white/10 py-5 text-lg font-bold active:scale-95">
+        sign out here
+      </button>
     </div>
   );
 }

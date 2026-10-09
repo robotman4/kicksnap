@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import { Flag } from "lucide-react";
 import { Avatar } from "../components/Avatar";
+import { ReportSheet } from "../components/Report";
 import { Media } from "../components/Media";
 import { api, Chat } from "../lib/api";
 import { ago, buzz } from "../lib/feel";
 
 /** Full-screen snap player. Tap to skip, swipe down to close. Each snap burns once shown. */
-export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string) => void }) {
+export function Viewer({ chat, onDone, toast }: { chat: Chat; onDone: (replyTo?: string) => void; toast: (t: string) => void }) {
   const [i, setI] = useState(0);
+  const [blob, setBlob] = useState<Blob | null>(null);
+  const [reporting, setReporting] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<string | null>(null);
   const [dy, setDy] = useState(0);
@@ -32,6 +36,7 @@ export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string
         if (layer) urls.push(URL.createObjectURL(layer));
         setOverlay(layer ? urls[1] : null);
         setUrl(urls[0]);
+        setBlob(blob);
         api.open(snap.id).catch(() => {});
       })
       .catch(() => !gone && next());
@@ -43,11 +48,12 @@ export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string
   }, [snap?.id]);
 
   useEffect(() => {
-    if (!url || !snap || snap.kind === "video" || !snap.seconds) return;
+    // the timer waits while you're reporting
+    if (!url || !snap || snap.kind === "video" || !snap.seconds || reporting) return;
     const t = setTimeout(next, snap.seconds * 1000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
+  }, [url, reporting]);
 
   if (!snap) return null;
   const timed = url && snap.kind === "photo" && snap.seconds > 0;
@@ -57,9 +63,10 @@ export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string
       className="fixed inset-0 z-30 touch-none bg-black text-white"
       data-nodrag
       style={{ transform: `translateY(${dy}px) scale(${1 - dy / 2000})`, borderRadius: dy ? 24 : 0, transition: dy ? "none" : "transform .3s" }}
-      onPointerDown={(e) => (y0.current = e.clientY)}
+      onPointerDown={(e) => !reporting && (y0.current = e.clientY)}
       onPointerMove={(e) => y0.current !== null && setDy(Math.max(0, e.clientY - y0.current))}
       onPointerUp={() => {
+        if (reporting || y0.current === null) return;
         const pulled = dy;
         y0.current = null;
         setDy(0);
@@ -93,6 +100,17 @@ export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string
           <Avatar name={chat.name} color={chat.color} size={36} group={chat.group} />
           <span className="font-bold">{chat.group ? `${snap.sender} · ${chat.name}` : chat.name}</span>
           <span className="text-sm text-white/60">{ago(snap.created_at)}</span>
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerUp={(e) => {
+              e.stopPropagation();
+              setReporting(true);
+            }}
+            aria-label="report this snap"
+            className="ml-auto grid h-10 w-10 place-items-center rounded-full bg-black/30 text-white/70 active:scale-90"
+          >
+            <Flag size={18} />
+          </button>
         </div>
       </div>
 
@@ -107,6 +125,18 @@ export function Viewer({ chat, onDone }: { chat: Chat; onDone: (replyTo?: string
           snap back
         </button>
       </div>
+
+      <ReportSheet
+        open={reporting}
+        username={snap.sender}
+        snap={blob}
+        onClose={() => setReporting(false)}
+        onDone={(blocked) => {
+          setReporting(false);
+          if (blocked) onDone();
+        }}
+        toast={toast}
+      />
     </div>
   );
 }

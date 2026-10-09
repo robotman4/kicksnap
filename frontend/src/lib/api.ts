@@ -1,9 +1,9 @@
-export type User = { username: string | null; color: string };
+export type User = { username: string | null; color: string; admin?: boolean; suspended_until?: number };
 export type Friend = { username: string; color: string };
 export type SnapMeta = { id: string; kind: "photo" | "video"; seconds: number; has_overlay: number; created_at: number; sender: string };
 export type ChatState = "new" | "received" | "delivered" | "opened" | "none";
 /** key is "u:<username>" for a friend, "g:<id>" for a group. */
-export type Chat = { key: string; name: string; color: string; group: boolean; state: ChatState; kind: "snap" | "chat"; at: number; snaps: SnapMeta[]; unread: number };
+export type Chat = { key: string; name: string; color: string; group: boolean; away?: boolean; state: ChatState; kind: "snap" | "chat"; at: number; snaps: SnapMeta[]; unread: number };
 export type Message = { id: number; body: string; at: number; from: string; color: string; mine: boolean };
 export type InviteMode = "open" | "members" | "admin";
 export type Group = {
@@ -19,6 +19,24 @@ export type Group = {
 };
 export type FriendLists = { friends: Friend[]; incoming: Friend[]; outgoing: Friend[] };
 export type Device = { id: number; label: string; created_at: number; seen_at: number; this: boolean };
+
+export type Reason = "spam" | "nudity" | "harassment" | "violence" | "other";
+export type AdminReport = {
+  id: number;
+  reported: string;
+  reported_gone: boolean;
+  reported_suspended: boolean;
+  reporter: string;
+  reason: Reason;
+  note: string;
+  media: string | null;
+  media_kind: "photo" | "video" | null;
+  was_friend: boolean;
+  friend_reporters: number;
+  at: number;
+};
+export type AdminUser = { username: string; color: string; created_at: number; devices: number; admin: boolean; suspended: boolean; suspended_until: number | null; open_reports: number };
+export type Reserved = { name: string; reason: string; by: string; at: number; expires_at: number | null };
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -75,6 +93,28 @@ export const api = {
   unblock: (username: string) => call(`/api/blocks/${encodeURIComponent(username)}`, { method: "DELETE" }),
   deleteAccount: (username: string) => call("/api/me", { method: "DELETE", body: json({ username }) }),
   chats: () => call<Chat[]>("/api/chats"),
+  report: (username: string, reason: Reason, note: string, block: boolean, file?: Blob | null) => {
+    const form = new FormData();
+    form.append("username", username);
+    form.append("reason", reason);
+    form.append("note", note);
+    form.append("block", String(block));
+    if (file) form.append("file", file, file.type.startsWith("video") ? "snap.webm" : "snap.jpg");
+    return call("/api/reports", { method: "POST", body: form });
+  },
+
+  admin: {
+    reports: () => call<AdminReport[]>("/api/admin/reports"),
+    dismiss: (id: number) => post(`/api/admin/reports/${id}/dismiss`),
+    suspend: (name: string, days: number | null) => post(`/api/admin/users/${encodeURIComponent(name)}/suspend`, { days }),
+    unsuspend: (name: string) => post(`/api/admin/users/${encodeURIComponent(name)}/unsuspend`),
+    remove: (name: string, reserve: boolean) => post(`/api/admin/users/${encodeURIComponent(name)}/delete`, { reserve }),
+    users: (q: string) => call<AdminUser[]>(`/api/admin/users?q=${encodeURIComponent(q)}`),
+    reserved: () => call<Reserved[]>("/api/admin/reserved"),
+    reserve: (name: string, reason: string) => post("/api/admin/reserved", { name, reason }),
+    release: (name: string) => call(`/api/admin/reserved/${encodeURIComponent(name)}`, { method: "DELETE" }),
+    log: () => call<{ admin: string; action: string; target: string; detail: string; at: number }[]>("/api/admin/log"),
+  },
   /** `to` holds chat keys: friends and groups in one list. */
   send: (blob: Blob, overlay: Blob | null, to: string[], seconds: number) => {
     const form = new FormData();
@@ -116,7 +156,8 @@ export type LiveEvent =
   | { type: "friends" }
   | { type: "message"; chat: string }
   | { type: "read"; chat: string }
-  | { type: "group"; closed?: string };
+  | { type: "group"; closed?: string }
+  | { type: "reports" };
 
 /** WebSocket with dumb exponential reconnect. The cookie authenticates it. */
 export function live(onConnect: () => void, onEvent: (e: LiveEvent) => void): () => void {

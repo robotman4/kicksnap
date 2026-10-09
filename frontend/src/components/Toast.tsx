@@ -8,7 +8,7 @@ export function Toast({ text, onDone }: { text: string | null; onDone: () => voi
   }, [text, onDone]);
   return (
     <div
-      className={`pointer-events-none fixed inset-x-0 top-[max(env(safe-area-inset-top),12px)] z-50 flex justify-center transition-all duration-300 ease-spring ${
+      className={`pointer-events-none fixed inset-x-0 top-[max(env(safe-area-inset-top),12px)] z-[60] flex justify-center transition-all duration-300 ease-spring ${
         text ? "translate-y-0 opacity-100" : "-translate-y-8 opacity-0"
       }`}
     >
