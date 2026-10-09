@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 declare global {
   // Chrome/Android ship this; Safari doesn't, so there we decode frames with jsQR.
@@ -66,7 +67,9 @@ export function Scanner({ hint, onClose, onCode }: { hint: string; onClose: () =
     };
   }, [typing]);
 
-  return (
+  // Portaled to <body>: inside the swipe pager, a transformed parent would pin
+  // "fixed" to the pager track instead of the screen.
+  return createPortal(
     <div className="fixed inset-0 z-50 bg-black text-white" data-nodrag>
       {!typing && (
         <>
@@ -108,6 +111,7 @@ export function Scanner({ hint, onClose, onCode }: { hint: string; onClose: () =
           </button>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }
