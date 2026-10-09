@@ -1,6 +1,7 @@
 import { ArrowRight, ChevronLeft, Fingerprint, Sparkles, Smartphone } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useRef, useState } from "react";
+import { TermsLink } from "../components/Terms";
 import { api, User } from "../lib/api";
 import { buzz } from "../lib/feel";
 import { passkeysSupported, signInWithPasskey } from "../lib/passkey";
@@ -36,6 +37,7 @@ export function Welcome({ onIn }: { onIn: (u: User) => void }) {
 
   return (
     <Screen>
+      <TermsLink className="absolute right-4 top-[max(env(safe-area-inset-top),14px)]" />
       <div className="mt-[12vh] flex flex-col items-start">
         <Logo />
         <h1 className="mt-8 text-[64px] font-black leading-[0.9] tracking-tight">
@@ -200,7 +202,7 @@ export function PickName({ onDone }: { onDone: (u: User) => void }) {
 
 function Screen({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full flex-col bg-black px-6 pb-[max(env(safe-area-inset-bottom),24px)] pt-[max(env(safe-area-inset-top),20px)] text-white">
+    <div className="relative flex h-full flex-col bg-black px-6 pb-[max(env(safe-area-inset-bottom),24px)] pt-[max(env(safe-area-inset-top),20px)] text-white">
       {children}
     </div>
   );

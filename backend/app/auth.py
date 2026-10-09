@@ -10,7 +10,7 @@ import secrets
 import time
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Cookie, HTTPException, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from webauthn import (
     generate_authentication_options, generate_registration_options, options_to_json,
@@ -22,11 +22,13 @@ from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
 )
 
+from .limits import limit
 from .db import db
 
 COOKIE = "ks_device"
 COOKIE_MAX_AGE = 400 * 24 * 3600  # browsers cap at ~400 days; refreshed on use
 LINK_TTL = 300
+SEEN_EVERY = 600  # seconds between "last active" updates per device
 USERNAME_RE = re.compile(r"^[a-z0-9_.]{3,20}$")
 RP_NAME = "kicksnap"
 
@@ -71,10 +73,12 @@ def user_for_token(token: str | None):
         return None
     with db() as conn:
         row = conn.execute(
-            "SELECT u.*, d.id AS device_id FROM devices d JOIN users u ON u.id = d.user_id WHERE d.token_hash = ?",
+            "SELECT u.*, d.id AS device_id, d.seen_at AS seen_at FROM devices d JOIN users u ON u.id = d.user_id WHERE d.token_hash = ?",
             (_hash(token),),
         ).fetchone()
-        if row:
+        # "active" only needs to be roughly right; writing on every request makes every
+        # read wait on SQLite's single writer
+        if row and now() - row["seen_at"] > SEEN_EVERY:
             conn.execute("UPDATE devices SET seen_at = ? WHERE id = ?", (now(), row["device_id"]))
         return row
 
@@ -100,7 +104,7 @@ def public(user) -> dict:
 
 # --- new account ------------------------------------------------------------
 
-@router.post("/devices/new")
+@router.post("/devices/new", dependencies=[Depends(limit("new-device", 10, 3600))])
 def start_fresh(request: Request, response: Response):
     """'I'm new': make an account for this device. Name comes next."""
     with db() as conn:
@@ -113,7 +117,7 @@ class Name(BaseModel):
     username: str
 
 
-@router.post("/me/name")
+@router.post("/me/name", dependencies=[Depends(limit("name", 20, 60))])
 def pick_name(body: Name, ks_device: str | None = Cookie(default=None)):
     user = any_user(ks_device)
     name = body.username.strip().lower()
@@ -127,7 +131,7 @@ def pick_name(body: Name, ks_device: str | None = Cookie(default=None)):
     return {"username": name, "color": user["color"]}
 
 
-@router.get("/names/{name}")
+@router.get("/names/{name}", dependencies=[Depends(limit("names", 60, 60))])
 def name_free(name: str):
     name = name.strip().lower()
     if not USERNAME_RE.match(name):
@@ -186,7 +190,7 @@ def _prune():
         _links.pop(code, None)
 
 
-@router.post("/link/start")
+@router.post("/link/start", dependencies=[Depends(limit("link", 10, 60))])
 def link_start():
     """New device asks to join. Shows the code as a QR for the other device to scan."""
     _prune()
@@ -211,7 +215,7 @@ def link_poll(code: str, secret: str, request: Request, response: Response):
     return {"approved": True, "user": public(user)}
 
 
-@router.post("/link/{code}/approve")
+@router.post("/link/{code}/approve", dependencies=[Depends(limit("approve", 10, 60))])
 def link_approve(code: str, ks_device: str | None = Cookie(default=None)):
     user = current_user(ks_device)
     _prune()
@@ -241,7 +245,7 @@ def _stash(challenge: bytes, user_id: int | None) -> str:
     return cid
 
 
-@router.post("/passkeys/register/begin")
+@router.post("/passkeys/register/begin", dependencies=[Depends(limit("passkey-reg", 10, 60))])
 def passkey_register_begin(request: Request, ks_device: str | None = Cookie(default=None)):
     user = current_user(ks_device)
     rp_id, _ = _rp(request)
@@ -287,7 +291,7 @@ def passkey_register_finish(body: Finish, request: Request, ks_device: str | Non
     return {"ok": True}
 
 
-@router.post("/passkeys/login/begin")
+@router.post("/passkeys/login/begin", dependencies=[Depends(limit("passkey", 20, 60))])
 def passkey_login_begin(request: Request):
     rp_id, _ = _rp(request)
     opts = generate_authentication_options(rp_id=rp_id, user_verification=UserVerificationRequirement.PREFERRED)

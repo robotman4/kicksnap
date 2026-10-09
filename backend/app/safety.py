@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
 from .auth import COOKIE, current_user, now
+from .limits import limit
 from .db import db
 from .hub import hub
 from .media import burn
@@ -25,7 +26,7 @@ def blocks(user=Depends(current_user)):
     return [dict(r) for r in rows]
 
 
-@router.post("/blocks")
+@router.post("/blocks", dependencies=[Depends(limit("block", 30, 60))])
 async def block(body: Who, user=Depends(current_user)):
     """Unfriends both ways, drops pending requests, and keeps them from finding you again."""
     me = user["id"]

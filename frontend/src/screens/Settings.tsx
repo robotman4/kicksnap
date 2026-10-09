@@ -2,6 +2,7 @@ import { Bell, BellOff, Check, Fingerprint, LogOut, QrCode, RefreshCw, Smartphon
 import { useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Scanner } from "../components/Scanner";
+import { TermsLink } from "../components/Terms";
 import { Sheet } from "../components/Sheet";
 import { api, Device, Friend, User } from "../lib/api";
 import { ACCENTS, ago, buzz, onColor, timerLabel, TIMERS } from "../lib/feel";
@@ -104,7 +105,8 @@ export function Settings({
     <>
       <Sheet open={open} onClose={onClose}>
         <div className="max-h-[80vh] overflow-y-auto px-6 pb-[max(env(safe-area-inset-bottom),24px)]">
-          <div className="flex flex-col items-center gap-3 pt-2">
+          <div className="relative flex flex-col items-center gap-3 pt-2">
+            <TermsLink className="absolute -right-2 top-0" />
             <Avatar name={me.username} color={me.color} size={96} />
             <p className="text-3xl font-black">@{me.username}</p>
           </div>

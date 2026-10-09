@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -63,6 +64,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
     PRIMARY KEY (snap_id, recipient_id)
 );
 CREATE INDEX IF NOT EXISTS deliveries_recipient ON deliveries(recipient_id, opened_at);
+CREATE INDEX IF NOT EXISTS snaps_sender ON snaps(sender_id, created_at);
+CREATE INDEX IF NOT EXISTS snaps_created ON snaps(created_at);
 CREATE TABLE IF NOT EXISTS groups (
     id          INTEGER PRIMARY KEY,
     name        TEXT NOT NULL,
@@ -89,6 +92,10 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_direct ON messages(sender_id, to_user, created_at);
 CREATE INDEX IF NOT EXISTS messages_group ON messages(group_id, created_at);
+CREATE INDEX IF NOT EXISTS messages_to ON messages(to_user, created_at);
+CREATE INDEX IF NOT EXISTS messages_created ON messages(created_at);
+CREATE INDEX IF NOT EXISTS snaps_group ON snaps(group_id, created_at);
+CREATE INDEX IF NOT EXISTS group_members_user ON group_members(user_id);
 -- blocking hides both people from each other: no friending, snaps or texts
 CREATE TABLE IF NOT EXISTS blocks (
     user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -103,6 +110,7 @@ CREATE TABLE IF NOT EXISTS reads (
     read_at     INTEGER NOT NULL,
     PRIMARY KEY (user_id, chat)
 );
+CREATE INDEX IF NOT EXISTS reads_chat ON reads(chat);
 """
 
 
@@ -124,10 +132,14 @@ def init() -> None:
         conn.executescript(SCHEMA)
 
 
+_local = threading.local()
+
+
 @contextmanager
 def db():
-    conn = connect()
-    try:
-        yield conn
-    finally:
-        conn.close()
+    """One connection per thread, reused. Autocommit, so nothing is left open between uses."""
+    conn = getattr(_local, "conn", None)
+    if conn is None or getattr(_local, "path", None) != DB_PATH:
+        conn = _local.conn = connect()
+        _local.path = DB_PATH
+    yield conn

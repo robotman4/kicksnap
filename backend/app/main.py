@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from . import db as store
 from .auth import COOKIE, current_user, public, router as auth_router, user_for_token
+from .limits import limit
 from .db import db
 from .chat import are_friends, blocked, member_ids, router as chat_router
 from .hub import hub
@@ -98,7 +99,7 @@ class AddFriend(BaseModel):
     username: str
 
 
-@app.post("/api/friends")
+@app.post("/api/friends", dependencies=[Depends(limit("friend", 30, 60))])
 async def add_friend(body: AddFriend, user=Depends(current_user)):
     """Send a request, or accept one if they already added you."""
     name = body.username.strip().lower().removeprefix("kicksnap:")
@@ -149,7 +150,7 @@ async def save_upload(upload: UploadFile, dest: Path, limit: int) -> None:
             out.write(chunk)
 
 
-@app.post("/api/snaps")
+@app.post("/api/snaps", dependencies=[Depends(limit("snap", 30, 60))])
 async def send_snap(
     file: UploadFile = File(...),
     overlay: UploadFile | None = File(None),

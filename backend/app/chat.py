@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from .auth import current_user, now
+from .limits import limit
 from .db import db
 from .hub import hub
 from .media import burn
@@ -107,93 +108,127 @@ def _row(state, at, kind, snaps, unread):
     return {"state": state, "at": at, "kind": kind, "snaps": [dict(s) for s in snaps], "unread": unread}
 
 
-def _friend_row(conn, me: int, f) -> dict:
-    new = conn.execute(
-        f"""SELECT {SNAP_COLS} FROM snaps s JOIN deliveries d ON d.snap_id = s.id JOIN users u ON u.id = s.sender_id
-           WHERE s.sender_id = ? AND d.recipient_id = ? AND d.opened_at IS NULL AND s.group_id IS NULL
-           ORDER BY s.created_at""",
-        (f["id"], me),
-    ).fetchall()
-    mine_read = read_at(conn, me, f"u:{f['id']}")
-    theirs_read = read_at(conn, f["id"], f"u:{me}")
-    unread = conn.execute(
-        "SELECT COUNT(*), MAX(created_at) FROM messages WHERE sender_id = ? AND to_user = ? AND created_at > ?",
-        (f["id"], me, mine_read),
-    ).fetchone()
-    if new:
-        return _row("new", new[-1]["created_at"], "snap", new, unread[0])
+def _friend_state(me, snaps, unread, last_snap, last_msg, their_read) -> dict:
+    if snaps:
+        return _row("new", snaps[-1]["created_at"], "snap", snaps, unread[0])
     if unread[0]:
         return _row("new", unread[1], "chat", [], unread[0])
-
-    snap = conn.execute(
-        """SELECT s.sender_id, s.created_at, d.opened_at FROM snaps s JOIN deliveries d ON d.snap_id = s.id
-           WHERE s.group_id IS NULL AND ((s.sender_id = :me AND d.recipient_id = :f) OR (s.sender_id = :f AND d.recipient_id = :me))
-           ORDER BY s.created_at DESC LIMIT 1""",
-        {"me": me, "f": f["id"]},
-    ).fetchone()
-    msg = conn.execute(
-        """SELECT sender_id, created_at FROM messages
-           WHERE (sender_id = :me AND to_user = :f) OR (sender_id = :f AND to_user = :me)
-           ORDER BY id DESC LIMIT 1""",
-        {"me": me, "f": f["id"]},
-    ).fetchone()
-    if msg and (not snap or msg["created_at"] >= snap["created_at"]):
-        if msg["sender_id"] == me:
-            seen = theirs_read >= msg["created_at"]
-            return _row("opened" if seen else "delivered", msg["created_at"], "chat", [], 0)
-        return _row("received", msg["created_at"], "chat", [], 0)
-    if snap is None:
+    if last_msg and (not last_snap or last_msg["created_at"] >= last_snap["created_at"]):
+        if last_msg["sender_id"] == me:
+            seen = their_read >= last_msg["created_at"]
+            return _row("opened" if seen else "delivered", last_msg["created_at"], "chat", [], 0)
+        return _row("received", last_msg["created_at"], "chat", [], 0)
+    if last_snap is None:
         return _row("none", 0, "snap", [], 0)
-    if snap["sender_id"] == me:
-        return _row("opened" if snap["opened_at"] else "delivered", snap["opened_at"] or snap["created_at"], "snap", [], 0)
-    return _row("received", snap["opened_at"] or snap["created_at"], "snap", [], 0)
+    if last_snap["sender_id"] == me:
+        return _row("opened" if last_snap["opened_at"] else "delivered", last_snap["opened_at"] or last_snap["created_at"], "snap", [], 0)
+    return _row("received", last_snap["opened_at"] or last_snap["created_at"], "snap", [], 0)
 
 
-def _group_row(conn, me: int, g) -> dict:
-    new = conn.execute(
-        f"""SELECT {SNAP_COLS} FROM snaps s JOIN deliveries d ON d.snap_id = s.id JOIN users u ON u.id = s.sender_id
-           WHERE s.group_id = :g AND d.recipient_id = :me AND d.opened_at IS NULL ORDER BY s.created_at""",
-        {"g": g["id"], "me": me},
-    ).fetchall()
-    unread = conn.execute(
-        f"""SELECT COUNT(*), MAX(created_at) FROM messages m
-           WHERE group_id = :g AND sender_id != :me AND created_at > :since AND {NOT_BLOCKED.format(col="m.sender_id")}""",
-        {"g": g["id"], "me": me, "since": read_at(conn, me, f"g:{g['id']}")},
-    ).fetchone()
-    if new:
-        return _row("new", new[-1]["created_at"], "snap", new, unread[0])
+def _group_state(me, g, snaps, unread, last) -> dict:
+    if snaps:
+        return _row("new", snaps[-1]["created_at"], "snap", snaps, unread[0])
     if unread[0]:
         return _row("new", unread[1], "chat", [], unread[0])
-    last = conn.execute(
-        """SELECT sender_id, created_at, 'chat' AS kind FROM messages WHERE group_id = :g
-           UNION ALL SELECT sender_id, created_at, 'snap' FROM snaps WHERE group_id = :g
-           ORDER BY created_at DESC LIMIT 1""",
-        {"g": g["id"]},
-    ).fetchone()
     if not last:
         return _row("none", g["created_at"], "snap", [], 0)
     return _row("delivered" if last["sender_id"] == me else "received", last["created_at"], last["kind"], [], 0)
 
 
+def _by(rows, key) -> dict:
+    out: dict = {}
+    for r in rows:
+        out.setdefault(r[key], []).append(r)
+    return out
+
+
 @router.get("/chats")
 def chats(user=Depends(current_user)):
-    """Friends and groups, Snapchat-style: new / received / delivered / opened, for snaps or chat."""
+    """
+    Friends and groups, Snapchat-style: new / received / delivered / opened, for snaps or chat.
+    A fixed handful of queries however many friends you have (this runs on every refresh).
+    """
     me = user["id"]
-    out = []
+    p = {"me": me}
     with db() as conn:
         friends = conn.execute(
             """SELECT u.id, u.username, u.color FROM friendships a
                JOIN friendships b ON b.user_id = a.friend_id AND b.friend_id = a.user_id
-               JOIN users u ON u.id = a.friend_id WHERE a.user_id = ?""",
-            (me,),
+               JOIN users u ON u.id = a.friend_id WHERE a.user_id = :me""",
+            p,
         ).fetchall()
-        for f in friends:
-            out.append({"key": f"u:{f['username']}", "name": f["username"], "color": f["color"], "group": False, **_friend_row(conn, me, f)})
+        new_direct = _by(conn.execute(
+            f"""SELECT {SNAP_COLS}, s.sender_id FROM snaps s JOIN deliveries d ON d.snap_id = s.id JOIN users u ON u.id = s.sender_id
+               WHERE d.recipient_id = :me AND d.opened_at IS NULL AND s.group_id IS NULL ORDER BY s.created_at""",
+            p,
+        ).fetchall(), "sender_id")
+        unread_direct = {r["sender_id"]: (r["n"], r["at"]) for r in conn.execute(
+            """SELECT m.sender_id, COUNT(*) AS n, MAX(m.created_at) AS at FROM messages m
+               LEFT JOIN reads r ON r.user_id = :me AND r.chat = 'u:' || m.sender_id
+               WHERE m.to_user = :me AND m.created_at > COALESCE(r.read_at, 0) GROUP BY m.sender_id""",
+            p,
+        )}
+        # how far each friend has read their chat with me
+        their_reads = {r["user_id"]: r["read_at"] for r in conn.execute("SELECT user_id, read_at FROM reads WHERE chat = 'u:' || :me", p)}
+        last_snap = {r["peer"]: r for r in conn.execute(
+            """SELECT peer, sender_id, created_at, opened_at FROM (
+                 SELECT CASE WHEN s.sender_id = :me THEN d.recipient_id ELSE s.sender_id END AS peer,
+                        s.sender_id, s.created_at, d.opened_at,
+                        ROW_NUMBER() OVER (PARTITION BY CASE WHEN s.sender_id = :me THEN d.recipient_id ELSE s.sender_id END
+                                           ORDER BY s.created_at DESC) AS rn
+                 FROM snaps s JOIN deliveries d ON d.snap_id = s.id
+                 WHERE s.group_id IS NULL AND (s.sender_id = :me OR d.recipient_id = :me))
+               WHERE rn = 1""",
+            p,
+        )}
+        last_msg = {r["peer"]: r for r in conn.execute(
+            """SELECT peer, sender_id, created_at FROM (
+                 SELECT CASE WHEN sender_id = :me THEN to_user ELSE sender_id END AS peer, sender_id, created_at,
+                        ROW_NUMBER() OVER (PARTITION BY CASE WHEN sender_id = :me THEN to_user ELSE sender_id END
+                                           ORDER BY id DESC) AS rn
+                 FROM messages WHERE sender_id = :me OR to_user = :me)
+               WHERE rn = 1""",
+            p,
+        )}
+
         groups = conn.execute(
-            "SELECT g.* FROM groups g JOIN group_members m ON m.group_id = g.id WHERE m.user_id = ?", (me,)
+            "SELECT g.* FROM groups g JOIN group_members m ON m.group_id = g.id WHERE m.user_id = :me", p
         ).fetchall()
-        for g in groups:
-            out.append({"key": f"g:{g['id']}", "name": g["name"], "color": g["color"], "group": True, **_group_row(conn, me, g)})
+        new_group = _by(conn.execute(
+            f"""SELECT {SNAP_COLS}, s.group_id FROM snaps s JOIN deliveries d ON d.snap_id = s.id JOIN users u ON u.id = s.sender_id
+               WHERE d.recipient_id = :me AND d.opened_at IS NULL AND s.group_id IS NOT NULL ORDER BY s.created_at""",
+            p,
+        ).fetchall(), "group_id")
+        unread_group = {r["group_id"]: (r["n"], r["at"]) for r in conn.execute(
+            f"""SELECT m.group_id, COUNT(*) AS n, MAX(m.created_at) AS at FROM messages m
+               JOIN group_members gm ON gm.group_id = m.group_id AND gm.user_id = :me
+               LEFT JOIN reads r ON r.user_id = :me AND r.chat = 'g:' || m.group_id
+               WHERE m.sender_id != :me AND m.created_at > COALESCE(r.read_at, 0) AND {NOT_BLOCKED.format(col="m.sender_id")}
+               GROUP BY m.group_id""",
+            p,
+        )}
+        last_group = {r["group_id"]: r for r in conn.execute(
+            """SELECT group_id, sender_id, created_at, kind FROM (
+                 SELECT group_id, sender_id, created_at, kind,
+                        ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC) AS rn FROM (
+                   SELECT group_id, sender_id, created_at, 'chat' AS kind FROM messages
+                   WHERE group_id IN (SELECT group_id FROM group_members WHERE user_id = :me)
+                   UNION ALL
+                   SELECT group_id, sender_id, created_at, 'snap' FROM snaps
+                   WHERE group_id IN (SELECT group_id FROM group_members WHERE user_id = :me)))
+               WHERE rn = 1""",
+            p,
+        )}
+
+    out = []
+    for f in friends:
+        snaps = [{k: r[k] for k in r.keys() if k != "sender_id"} for r in new_direct.get(f["id"], [])]
+        state = _friend_state(me, snaps, unread_direct.get(f["id"], (0, None)), last_snap.get(f["id"]), last_msg.get(f["id"]), their_reads.get(f["id"], 0))
+        out.append({"key": f"u:{f['username']}", "name": f["username"], "color": f["color"], "group": False, **state})
+    for g in groups:
+        snaps = [{k: r[k] for k in r.keys() if k != "group_id"} for r in new_group.get(g["id"], [])]
+        state = _group_state(me, g, snaps, unread_group.get(g["id"], (0, None)), last_group.get(g["id"]))
+        out.append({"key": f"g:{g['id']}", "name": g["name"], "color": g["color"], "group": True, **state})
     out.sort(key=lambda c: (c["state"] != "new", -c["at"], c["name"]))
     return out
 
@@ -248,7 +283,7 @@ class NewMessage(BaseModel):
     body: str
 
 
-@router.post("/chats/{key}/messages")
+@router.post("/chats/{key}/messages", dependencies=[Depends(limit("text", 60, 60))])
 async def send_message(key: str, msg: NewMessage, user=Depends(current_user)):
     body = msg.body.strip()
     if not body:
@@ -352,7 +387,7 @@ def _details(conn, g, me: int) -> dict:
     }
 
 
-@router.post("/groups")
+@router.post("/groups", dependencies=[Depends(limit("group", 10, 60))])
 async def create_group(body: NewGroup, user=Depends(current_user)):
     me = user["id"]
     name = _clean_name(body.name)
@@ -405,7 +440,7 @@ async def update_group(group_id: int, body: GroupPatch, user=Depends(current_use
     return result
 
 
-@router.post("/groups/{group_id}/members")
+@router.post("/groups/{group_id}/members", dependencies=[Depends(limit("invite", 30, 60))])
 async def invite(group_id: int, body: Invite, user=Depends(current_user)):
     me = user["id"]
     with db() as conn:
@@ -422,7 +457,7 @@ async def invite(group_id: int, body: Invite, user=Depends(current_user)):
     return result
 
 
-@router.post("/groups/join")
+@router.post("/groups/join", dependencies=[Depends(limit("join", 10, 60))])
 async def join(body: Join, user=Depends(current_user)):
     code = body.code.strip().removeprefix("kicksnap-group:")
     with db() as conn:
