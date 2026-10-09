@@ -23,7 +23,18 @@ function Mark({ kind }: { kind: (typeof STATE)[ChatState]["mark"] }) {
   );
 }
 
-export function Chats({ chats, onOpen, onSnapBack, onFriends, onRefresh }: { chats: Chat[]; onOpen: (c: Chat) => void; onSnapBack: (name: string) => void; onFriends: () => void; onRefresh: () => Promise<unknown> }) {
+export type Outgoing = Record<string, { failed: boolean; retry: () => void }>;
+
+/** Outline arrow that keeps filling in while the snap uploads. */
+function Sending() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" className="text-accent">
+      <path d="M2 1.5 12.5 7 2 12.5 4.5 7Z" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" className="animate-[sending_1s_ease-in-out_infinite]" />
+    </svg>
+  );
+}
+
+export function Chats({ chats, outgoing, onOpen, onSnapBack, onFriends, onRefresh }: { chats: Chat[]; outgoing: Outgoing; onOpen: (c: Chat) => void; onSnapBack: (name: string) => void; onFriends: () => void; onRefresh: () => Promise<unknown> }) {
   return (
     <div className="flex h-full flex-col bg-black text-white">
       <header className="px-5 pb-3 pt-[max(env(safe-area-inset-top),18px)]">
@@ -39,23 +50,30 @@ export function Chats({ chats, onOpen, onSnapBack, onFriends, onRefresh }: { cha
             </button>
           </div>
         )}
-        {chats.map((c) => {
+        {[...chats.filter((c) => outgoing[c.username]), ...chats.filter((c) => !outgoing[c.username])].map((c) => {
           const s = STATE[c.state];
           const isNew = c.state === "new";
+          const out = outgoing[c.username];
           return (
             <div key={c.username} className="flex items-center gap-1 pr-3">
               <button
-                onClick={() => (isNew ? onOpen(c) : onSnapBack(c.username))}
+                onClick={() => (out?.failed ? out.retry() : isNew ? onOpen(c) : out ? undefined : onSnapBack(c.username))}
                 className="flex min-w-0 flex-1 items-center gap-4 px-5 py-3 text-left transition active:bg-white/5"
               >
                 <Avatar name={c.username} color={c.color} size={52} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-lg font-bold">{c.username}</p>
-                  <p className={`flex items-center gap-2 text-sm ${isNew ? "font-bold text-accent" : "text-white/50"}`}>
-                    <Mark kind={s.mark} />
-                    {isNew && c.snaps.length > 1 ? `${c.snaps.length} new snaps` : s.label}
-                    {c.at > 0 && <span className="text-white/35">· {ago(c.at)}</span>}
-                  </p>
+                  {out ? (
+                    <p className={`flex items-center gap-2 text-sm font-bold ${out.failed ? "text-red-400" : "text-accent"}`}>
+                      {out.failed ? "didn't send · tap to retry" : <><Sending /> sending…</>}
+                    </p>
+                  ) : (
+                    <p className={`flex items-center gap-2 text-sm ${isNew ? "font-bold text-accent" : "text-white/50"}`}>
+                      <Mark kind={s.mark} />
+                      {isNew && c.snaps.length > 1 ? `${c.snaps.length} new snaps` : s.label}
+                      {c.at > 0 && <span className="text-white/35">· {ago(c.at)}</span>}
+                    </p>
+                  )}
                 </div>
               </button>
               <button

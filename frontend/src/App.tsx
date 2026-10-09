@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pager } from "./components/Pager";
 import { Toast } from "./components/Toast";
-import { api, Chat, FriendLists, live, User } from "./lib/api";
+import { api, ApiError, Chat, FriendLists, live, User } from "./lib/api";
 import { Bell } from "lucide-react";
 import { applyAccent, buzz, pref } from "./lib/feel";
 import { enablePush, pushState, syncPush } from "./lib/push";
@@ -38,6 +38,8 @@ export default function App() {
   if (!me.username) return <PickName onDone={setMe} />;
   return <Home me={me as User & { username: string }} setMe={setMe} />;
 }
+
+type Outgoing = { id: string; to: string[]; seconds: number; made: Promise<{ file: Blob; overlay: Blob | null }>; failed: boolean };
 
 function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User | null) => void }) {
   const [page, setPage] = useState(CAMERA);
@@ -85,30 +87,54 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
     setPage(CAMERA);
   };
 
-  const send = async (file: Blob, overlay: Blob | null, to: string[], secs: number) => {
-    if (!capture) return;
+  // Sends run in the background: the editor closes straight away and the chat rows
+  // show "sending" until the upload lands. Failed ones stay on the row to retry.
+  const [outbox, setOutbox] = useState<Outgoing[]>([]);
+  const upload = async (job: Outgoing) => {
+    setOutbox((o) => o.map((j) => (j.id === job.id ? { ...j, failed: false } : j)));
     try {
-      const r = await api.send(file, overlay, to, capture.kind === "video" ? 0 : secs);
+      const { file, overlay } = await job.made;
+      await api.send(file, overlay, job.to, job.seconds);
       buzz([8, 40, 16]);
-      setToast(`sent to ${r.sent_to.map((n) => "@" + n).join(", ")}`);
-      URL.revokeObjectURL(capture.url);
-      setCapture(null);
-      setReplyTo(null);
-      refresh();
+      await refresh();
+      setOutbox((o) => o.filter((j) => j.id !== job.id));
       // offer notifications once, right after the first snap goes out
       if (!pref.get("asked-push", "")) {
         pref.set("asked-push", "1");
         pushState().then((s) => s === "off" && setAskPush(true));
       }
     } catch (e) {
-      setToast((e as Error).message);
+      setOutbox((o) => o.map((j) => (j.id === job.id ? { ...j, failed: true } : j)));
+      // network drops just show on the row; only surface what the server actually said
+      if (e instanceof ApiError) setToast(e.message);
     }
   };
+
+  const send = (make: () => Promise<{ file: Blob; overlay: Blob | null }>, to: string[], secs: number) => {
+    if (!capture) return;
+    const cap = capture;
+    // let the chats page paint before the full-res encode grabs the main thread
+    const made = new Promise<void>((ok) => requestAnimationFrame(() => setTimeout(ok, 50)))
+      .then(make)
+      .finally(() => URL.revokeObjectURL(cap.url));
+    made.catch(() => {});
+    const job: Outgoing = { id: cap.url, to, seconds: cap.kind === "video" ? 0 : secs, made, failed: false };
+    buzz(8);
+    setCapture(null);
+    setReplyTo(null);
+    setPage(CHATS);
+    setOutbox((o) => [...o, job]);
+    upload(job);
+  };
+
+  const outgoing = Object.fromEntries(
+    outbox.flatMap((j) => j.to.map((n) => [n, { failed: j.failed, retry: () => upload(j) }] as const))
+  );
 
   return (
     <div className="h-full bg-black">
       <Pager index={page} onChange={setPage}>
-        <Chats chats={chats} onRefresh={refresh} onOpen={setViewing} onSnapBack={snapAt} onFriends={() => setPage(FRIENDS)} />
+        <Chats chats={chats} outgoing={outgoing} onRefresh={refresh} onOpen={setViewing} onSnapBack={snapAt} onFriends={() => setPage(FRIENDS)} />
         <Camera
           me={me}
           active={page === CAMERA && !capture && !viewing}

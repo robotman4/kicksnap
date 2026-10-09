@@ -111,7 +111,8 @@ export function Preview({
   friends: Friend[];
   preselect: string[];
   onClose: () => void;
-  onSend: (file: Blob, overlay: Blob | null, to: string[], seconds: number) => Promise<void>;
+  /** Called right away; `make` renders the final file, so the heavy work happens after the editor closes. */
+  onSend: (make: () => Promise<{ file: Blob; overlay: Blob | null }>, to: string[], seconds: number) => void;
   onAddFriends: () => void;
 }) {
   const [seconds, setSeconds] = useState(() => Number(pref.get("seconds", "5")));
@@ -194,15 +195,10 @@ export function Preview({
     setTo((t) => (t.includes(name) ? t.filter((n) => n !== name) : [...t, name]));
   };
 
-  const send = async (recipients = to) => {
+  const send = (recipients = to) => {
     if (!recipients.length || sending) return;
     setSending(true);
-    try {
-      const { file, overlay } = await compose(capture, dims, strokes, label);
-      await onSend(file, overlay, recipients, seconds);
-    } finally {
-      setSending(false);
-    }
+    onSend(() => compose(capture, dims, strokes, label), recipients, seconds);
   };
 
   const save = async () => {
