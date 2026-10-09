@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at  INTEGER NOT NULL,
     is_admin    INTEGER NOT NULL DEFAULT 0,       -- set from the server shell: python -m app.admin grant
     suspended_at    INTEGER,                      -- set = suspended
-    suspended_until INTEGER                       -- NULL with suspended_at set = until lifted
+    suspended_until INTEGER,                      -- NULL with suspended_at set = until lifted
+    suspend_reason  TEXT                          -- shown to them on the suspended screen
 );
 -- every browser/phone is a device; its secret lives in an httpOnly cookie
 CREATE TABLE IF NOT EXISTS devices (
@@ -132,6 +133,19 @@ CREATE TABLE IF NOT EXISTS reports (
     outcome       TEXT              -- dismissed | suspended | deleted
 );
 CREATE INDEX IF NOT EXISTS reports_open ON reports(closed_at, reported_id);
+-- a suspended person asking to be let back in: one per suspension
+CREATE TABLE IF NOT EXISTS appeals (
+    id            INTEGER PRIMARY KEY,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    suspended_at  INTEGER NOT NULL,   -- which suspension this is about
+    body          TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    closed_at     INTEGER,
+    closed_by     TEXT,
+    outcome       TEXT,               -- lifted | rejected
+    reply         TEXT NOT NULL DEFAULT '',
+    UNIQUE (user_id, suspended_at)
+);
 -- proof attached to a report: copies of texts (they'd burn after 24h) and screenshots
 CREATE TABLE IF NOT EXISTS report_items (
     id         INTEGER PRIMARY KEY,
@@ -179,7 +193,7 @@ def init() -> None:
         if cols and "group_id" not in cols:
             conn.execute("ALTER TABLE snaps ADD COLUMN group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE")
         ucols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-        for col, ddl in [("is_admin", "INTEGER NOT NULL DEFAULT 0"), ("suspended_at", "INTEGER"), ("suspended_until", "INTEGER")]:
+        for col, ddl in [("is_admin", "INTEGER NOT NULL DEFAULT 0"), ("suspended_at", "INTEGER"), ("suspended_until", "INTEGER"), ("suspend_reason", "TEXT")]:
             if ucols and col not in ucols:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
         fresh_reserved = not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'reserved_usernames'").fetchone()

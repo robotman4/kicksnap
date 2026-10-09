@@ -79,17 +79,21 @@ Nobody is admin by default. Whoever runs the server grants it from the shell:
 ```bash
 docker compose exec kicksnap python -m app.admin grant kim     # revoke / list too
 docker compose exec kicksnap python -m app.admin reports       # open reports
-docker compose exec kicksnap python -m app.admin suspend sam --days 7
+docker compose exec kicksnap python -m app.admin suspend sam --days 7 --reason "harassment"
+docker compose exec kicksnap python -m app.admin appeals       # open appeals; lift with unsuspend
 docker compose exec kicksnap python -m app.admin delete sam    # --free-name to not reserve it
 docker compose exec kicksnap python -m app.admin reserve ceo "impersonation"
 ```
 
-- Admins get an "admin" tile in their profile: open reports (with the snap if the reporter attached it), user
-  search, reserved names and a log of every admin action.
-- Reporting is in the app (snap viewer flag, or a friend's chat options). It blocks by default. No email, no
-  scores; the "friends who reported" count only sorts the queue. Admins get one push when the queue goes from
-  empty to not empty.
-- Suspend (optionally for N days) keeps the account but locks it; friends see "unavailable". Delete wipes it and
+- Admins get an "admin" tile in their profile: open appeals and reports (with any snap, texts and screenshots the
+  reporter attached), user search, reserved names and a log of every admin action.
+- Reporting is in the app (snap viewer flag, tapping someone's text, or a friend's chat options). It blocks by
+  default. Picked texts are copied into the report, since texts burn after 24h. No email, no
+  scores; the "friends who reported" count only sorts the queue. Admins get one push when the queue (reports and
+  appeals) goes from empty to not empty.
+- Suspend (optionally for N days) keeps the account but locks it; friends see "unavailable". The suspended person
+  sees the reason (what they were reported for, unless you give one) and can send one appeal per suspension.
+  Admins lift it or keep it, with a short answer the person sees. Delete wipes it and
   by default reserves the name.
 - People who delete their own account get their name held for `NAME_COOLDOWN_DAYS` (default 30), then freed.
 - If anyone reports illegal content (for example child sexual abuse material), you have to act on it and may be

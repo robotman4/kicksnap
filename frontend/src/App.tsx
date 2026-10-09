@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pager } from "./components/Pager";
 import { Toast } from "./components/Toast";
-import { api, ApiError, Chat, FriendLists, live, User } from "./lib/api";
+import { api, ApiError, Chat, FriendLists, live, Suspension, User } from "./lib/api";
 import { Bell } from "lucide-react";
 import { applyAccent, buzz, pref } from "./lib/feel";
 import { enablePush, pushState, syncPush } from "./lib/push";
@@ -39,7 +39,7 @@ export default function App() {
   if (booting) return <div className="h-full bg-black" />;
   if (!me) return <Welcome onIn={setMe} />;
   if (!me.username) return <PickName onDone={setMe} />;
-  if (me.suspended_until !== undefined) return <Suspended me={me} onOut={() => api.logout().finally(() => setMe(null))} />;
+  if (me.suspended_until !== undefined) return <Suspended me={me} onOut={() => api.logout().finally(() => setMe(null))} onBack={() => api.me().then(setMe, () => {})} />;
   return <Home me={me as User & { username: string }} setMe={setMe} />;
 }
 
@@ -320,16 +320,84 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
   );
 }
 
-function Suspended({ me, onOut }: { me: User; onOut: () => void }) {
-  const until = me.suspended_until ? new Date(me.suspended_until * 1000).toLocaleDateString() : null;
+function Suspended({ me, onOut, onBack }: { me: User; onOut: () => void; onBack: () => void }) {
+  const [state, setState] = useState<Suspension | null>(null);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = () =>
+    api.suspension().then((s) => (s.suspended ? setState(s) : onBack()), () => {});
+  useEffect(() => {
+    load();
+    // an admin may have answered while the app was in the background
+    const vis = () => !document.hidden && load();
+    document.addEventListener("visibilitychange", vis);
+    return () => document.removeEventListener("visibilitychange", vis);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const s = state?.suspended ? state : null;
+  const until = (s ? s.until : me.suspended_until) || 0;
+  const send = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.appeal(text);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="flex h-full flex-col justify-center gap-4 bg-black px-8 text-white">
+    <div className="flex h-full flex-col justify-center gap-4 overflow-y-auto bg-black px-8 py-[max(env(safe-area-inset-top),24px)] text-white">
       <p className="text-5xl">⏸️</p>
       <h1 className="text-4xl font-black leading-tight">@{me.username} is on a break</h1>
       <p className="text-lg text-white/60">
-        The people running this server suspended your account{until ? ` until ${until}` : ""}. You can't send or get snaps while it lasts.
+        The people running this server suspended your account
+        {until ? ` until ${new Date(until * 1000).toLocaleDateString()}` : " until they lift it"}. You can't send or get snaps while it lasts.
       </p>
-      <button onClick={onOut} className="mt-6 rounded-full bg-white/10 py-5 text-lg font-bold active:scale-95">
+      {s?.reason && (
+        <p className="rounded-3xl bg-white/5 px-5 py-3 text-white/80">
+          <span className="text-sm font-bold text-white/40">reason</span>
+          <br />
+          {s.reason}
+        </p>
+      )}
+      {s && !s.appeal && (
+        <div className="mt-2">
+          <p className="font-black">think it's a mistake?</p>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value.slice(0, 1000))}
+            placeholder="tell them why they should lift it"
+            rows={3}
+            className="mt-2 w-full resize-none rounded-3xl bg-white/10 px-5 py-3 text-lg font-semibold outline-none placeholder:text-white/30"
+            style={{ userSelect: "text", WebkitUserSelect: "text" }}
+          />
+          <p className="mt-1 text-sm text-white/40">You get one appeal per suspension.</p>
+          {error && <p className="mt-1 text-sm font-bold text-red-400">{error}</p>}
+          <button
+            onClick={send}
+            disabled={!text.trim() || busy}
+            className="mt-3 w-full rounded-full bg-accent py-5 text-lg font-black text-black transition active:scale-95 disabled:opacity-30"
+          >
+            send appeal
+          </button>
+        </div>
+      )}
+      {s?.appeal && !s.appeal.outcome && (
+        <p className="rounded-3xl bg-white/5 px-5 py-3 text-white/70">Appeal sent. You'll see their answer here.</p>
+      )}
+      {s?.appeal?.outcome === "rejected" && (
+        <div className="rounded-3xl bg-white/5 px-5 py-3">
+          <p className="font-black">they kept the suspension</p>
+          {s.appeal.reply && <p className="mt-1 text-white/80">“{s.appeal.reply}”</p>}
+        </div>
+      )}
+      <button onClick={onOut} className="mt-4 rounded-full bg-white/10 py-5 text-lg font-bold active:scale-95">
         sign out here
       </button>
     </div>

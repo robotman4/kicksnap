@@ -5,9 +5,9 @@ Server-shell admin tool. Shell access is what proves you run the server.
     python -m app.admin revoke <name>
     python -m app.admin list                  admins
     python -m app.admin reports               open reports
-    python -m app.admin suspend <name> [--days N]
+    python -m app.admin suspend <name> [--days N] [--reason TEXT]
     python -m app.admin unsuspend <name>
-    python -m app.admin delete <name> [--free-name]
+    python -m app.admin appeals               open appeals    python -m app.admin delete <name> [--free-name]
     python -m app.admin reserve <name> [reason]
     python -m app.admin release <name>
 
@@ -20,7 +20,7 @@ import time
 from . import db as store
 from .auth import suspended
 from .db import db
-from .moderation import _close_reports, delete_user, log
+from .moderation import delete_user, lift, log, suspend_user
 
 ACTOR = "shell"
 
@@ -39,9 +39,11 @@ def main(argv=None):
         sub.add_parser(c).add_argument("name")
     sub.add_parser("list")
     sub.add_parser("reports")
+    sub.add_parser("appeals")
     s = sub.add_parser("suspend")
     s.add_argument("name")
     s.add_argument("--days", type=int, default=None, help="leave out to suspend until lifted")
+    s.add_argument("--reason", default="", help="shown to them; defaults to what they were reported for")
     d = sub.add_parser("delete")
     d.add_argument("name")
     d.add_argument("--free-name", action="store_true", help="don't reserve the name afterwards")
@@ -67,16 +69,20 @@ def main(argv=None):
                 media = " [snap attached]" if r["media"] else ""
                 print(f"#{r['id']}  @{r['reported_name']}  by @{r['reporter_name']}  {r['reason']}{media}  {r['note']}")
             print(f"{len(rows)} open")
+        elif a.cmd == "appeals":
+            rows = conn.execute(
+                "SELECT a.*, u.username FROM appeals a JOIN users u ON u.id = a.user_id WHERE a.closed_at IS NULL ORDER BY a.created_at"
+            ).fetchall()
+            for r in rows:
+                print(f"@{r['username']}: {r['body']}")
+            print(f"{len(rows)} open (lift with: unsuspend <name>)")
         elif a.cmd == "suspend":
             u = _user(conn, a.name)
-            until = now + a.days * 86400 if a.days else None
-            conn.execute("UPDATE users SET suspended_at = ?, suspended_until = ? WHERE id = ?", (now, until, u["id"]))
-            _close_reports(conn, u["id"], ACTOR, "suspended")
-            log(conn, ACTOR, "suspend", u["username"], f"{a.days} days" if a.days else "until lifted")
+            suspend_user(conn, ACTOR, u, a.days, a.reason)
             print(f"@{u['username']} suspended" + (f" for {a.days} days" if a.days else " until lifted"))
         elif a.cmd == "unsuspend":
             u = _user(conn, a.name)
-            conn.execute("UPDATE users SET suspended_at = NULL, suspended_until = NULL WHERE id = ?", (u["id"],))
+            lift(conn, u["id"], ACTOR)
             log(conn, ACTOR, "unsuspend", u["username"])
             print(f"@{u['username']} unsuspended" if suspended(u) else f"@{u['username']} wasn't suspended")
         elif a.cmd == "delete":
