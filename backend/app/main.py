@@ -31,7 +31,7 @@ STATIC_DIR = Path(os.getenv("STATIC_DIR", "../frontend/dist"))
 VIEW_SECONDS = {0, 3, 5, 10}
 
 errors.setup()
-app = FastAPI(title="Kicksnap", version=__version__, docs_url=f"{API}/docs", openapi_url=f"{API}/openapi.json")
+app = FastAPI(title="Kiks", version=__version__, docs_url=f"{API}/docs", openapi_url=f"{API}/openapi.json")
 app.add_exception_handler(Exception, errors.unhandled)
 app.add_middleware(Unversioned)
 app.include_router(auth_router)
@@ -108,7 +108,7 @@ class AddFriend(BaseModel):
 @app.post(API + "/friends", dependencies=[Depends(limit("friend", 30, 60))])
 async def add_friend(body: AddFriend, user=Depends(current_user)):
     """Send a request, or accept one if they already added you."""
-    name = body.username.strip().lower().removeprefix("kicksnap:")
+    name = body.username.strip().lower().removeprefix("kiks:").removeprefix("kicksnap:")
     with db() as conn:
         other = conn.execute("SELECT * FROM users WHERE username = ?", (name,)).fetchone()
         # a block looks the same as no such person, from both sides
@@ -124,7 +124,7 @@ async def add_friend(body: AddFriend, user=Depends(current_user)):
         ).fetchone()
     await hub.push(other["id"], {"type": "friends"})
     body = f"@{user['username']} accepted you 🙌" if mutual else f"@{user['username']} added you"
-    asyncio.create_task(notify(other["id"], {"title": "kicksnap", "body": body, "tag": f"friend-{user['username']}"}))
+    asyncio.create_task(notify(other["id"], {"title": "Kiks", "body": body, "tag": f"friend-{user['username']}"}))
     return {"username": other["username"], "status": "friends" if mutual else "requested"}
 
 
@@ -213,7 +213,7 @@ async def send_snap(
             await hub.push(r["id"], {"type": "snap", "from": user["username"]})
             where = next((t[2] for t in targets if t[0] == gid), "") if gid else ""
             body = f"new snap from @{user['username']} in {where} 📸" if gid else f"new snap from @{user['username']} 📸"
-            asyncio.create_task(notify(r["id"], {"title": "kicksnap", "body": body, "tag": f"g:{gid}" if gid else user["username"]}))
+            asyncio.create_task(notify(r["id"], {"title": "Kiks", "body": body, "tag": f"g:{gid}" if gid else user["username"]}))
     sent_to = [r["username"] for r in direct] + [t[2] for t in targets if t[0]]
     return {"id": snap_id, "sent_to": sent_to}
 

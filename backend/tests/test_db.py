@@ -48,3 +48,16 @@ def test_backup_is_a_readable_copy(monkeypatch, tmp_path):
     store.backup(out)
     conn = sqlite3.connect(out)
     assert conn.execute("SELECT COUNT(*) FROM reserved_usernames").fetchone()[0] > 0
+
+
+def test_upgrade_reserves_new_app_name(monkeypatch, tmp_path):
+    path = _at(monkeypatch, tmp_path)
+    store.init()
+    conn = sqlite3.connect(path)
+    conn.execute("DELETE FROM reserved_usernames WHERE name = 'kiks'")
+    conn.execute("PRAGMA user_version = 1")  # as before the rename
+    conn.commit()
+    conn.close()
+    store.init()
+    conn = sqlite3.connect(path)
+    assert conn.execute("SELECT 1 FROM reserved_usernames WHERE name = 'kiks'").fetchone()

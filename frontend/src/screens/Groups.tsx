@@ -117,7 +117,7 @@ export function GroupInfo({
     setConfirmClose(false);
   }, [id]);
   useEffect(() => {
-    if (g?.code) QRCode.toDataURL(`kicksnap-group:${g.code}`, { margin: 1, width: 480, color: { dark: "#000000", light: "#00000000" } }).then(setQr);
+    if (g?.code) QRCode.toDataURL(`kiks-group:${g.code}`, { margin: 1, width: 480, color: { dark: "#000000", light: "#00000000" } }).then(setQr);
   }, [g?.code]);
 
   const run = async (p: Promise<unknown>, after?: () => void) => {

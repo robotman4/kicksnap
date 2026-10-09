@@ -26,7 +26,7 @@ from .api import API, device_token
 from .auth import current_user, now
 from .db import DATA_DIR, db
 
-log = logging.getLogger("kicksnap.push")
+log = logging.getLogger("kiks.push")
 router = APIRouter(prefix=f"{API}/push")
 
 VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "https://github.com/robotman4/kicksnap")
@@ -129,7 +129,7 @@ async def _send_one(endpoint: str, p256dh: str, auth: str, payload: dict) -> int
         "Content-Type": "application/octet-stream",
         "TTL": str(24 * 3600),
         "Urgency": "high",
-        "Topic": payload.get("tag", "kicksnap")[:32].replace(".", "-") or "kicksnap",
+        "Topic": payload.get("tag", "kiks")[:32].replace(".", "-") or "kiks",
         "Authorization": f"vapid t={_jwt(f'{u.scheme}://{u.netloc}')}, k={b64u(_raw_public(vapid()))}",
     }
     try:

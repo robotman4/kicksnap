@@ -1,5 +1,5 @@
 // App-shell cache only. Snaps and API calls always go to the network.
-const CACHE = "kicksnap-v2";
+const CACHE = "kiks-v3";
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/", "/manifest.webmanifest", "/icon.svg"])));
@@ -40,9 +40,9 @@ self.addEventListener("push", (e) => {
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
       // the app is open and on screen: it already updated live, no need to buzz twice
       if (wins.some((w) => w.visibilityState === "visible")) return;
-      return self.registration.showNotification(data.title || "kicksnap", {
+      return self.registration.showNotification(data.title || "Kiks", {
         body: data.body || "new snap",
-        tag: data.tag || "kicksnap",
+        tag: data.tag || "kiks",
         renotify: true,
         icon: "/icon.svg",
         badge: "/icon.svg",

@@ -50,7 +50,7 @@ def test_parallel_push_prunes_dead_and_survives_slow(new_user, monkeypatch):
     async def run():
         monkeypatch.setattr(push, "_client", httpx.AsyncClient(transport=httpx.MockTransport(handler)))
         start = time.monotonic()
-        await push.notify(uid, {"title": "kicksnap", "body": "hi", "tag": "t"})
+        await push.notify(uid, {"title": "Kiks", "body": "hi", "tag": "t"})
         return time.monotonic() - start
 
     took = asyncio.run(run())

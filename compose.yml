@@ -1,7 +1,7 @@
 services:
-  kicksnap:
+  kiks:
     build: .
-    image: kicksnap:latest
+    image: kiks:latest
     restart: unless-stopped
     environment:
       SNAP_TTL_HOURS: ${SNAP_TTL_HOURS:-24}
@@ -11,6 +11,7 @@ services:
       # reverse proxy address(es) uvicorn trusts for X-Forwarded-For/-Proto; see docs/deploy.md
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     volumes:
+      # the volume keeps its old name so existing data stays put
       - kicksnap-data:/data
     ports:
       - "${PORT:-8080}:8000"

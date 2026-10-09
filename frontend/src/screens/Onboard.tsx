@@ -76,7 +76,7 @@ function Back({ onBack, onIn, onPasskey, error }: { onBack: () => void; onIn: (u
       const l = await api.linkStart();
       if (!alive) return;
       setLink(l);
-      setQr(await QRCode.toDataURL(`kicksnap-link:${l.code}`, { margin: 1, width: 480, color: { dark: "#000", light: "#0000" } }));
+      setQr(await QRCode.toDataURL(`kiks-link:${l.code}`, { margin: 1, width: 480, color: { dark: "#000", light: "#0000" } }));
       const poll = async () => {
         try {
           const r = await api.linkPoll(l.code, l.secret);
@@ -111,7 +111,7 @@ function Back({ onBack, onIn, onPasskey, error }: { onBack: () => void; onIn: (u
           <p className="flex items-center gap-1.5 text-sm font-black opacity-60">
             <Smartphone size={16} /> on your phone
           </p>
-          <p className="mt-1 text-lg font-black leading-tight">open kicksnap, tap your face, scan this</p>
+          <p className="mt-1 text-lg font-black leading-tight">open Kiks, tap your face, scan this</p>
           <p className="mt-2 font-mono text-2xl font-black tracking-[0.2em]">{link?.code ?? "······"}</p>
         </div>
       </div>

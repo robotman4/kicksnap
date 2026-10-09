@@ -17,7 +17,8 @@ API = f"/api/v{VERSION}"
 COOKIE = "ks_device"
 VERSIONED = re.compile(r"^/api/v\d+/")
 # a client sends this on sign-in to get its secret in the response body instead of a cookie
-TOKEN_HEADER = "x-kicksnap-auth"
+TOKEN_HEADER = "x-kiks-auth"
+OLD_TOKEN_HEADER = "x-kicksnap-auth"  # before the rename; still accepted
 
 
 def device_token(request: HTTPConnection) -> str | None:
@@ -29,7 +30,8 @@ def device_token(request: HTTPConnection) -> str | None:
 
 
 def wants_token(request: HTTPConnection) -> bool:
-    return request.headers.get(TOKEN_HEADER, "").lower() == "bearer"
+    asked = request.headers.get(TOKEN_HEADER) or request.headers.get(OLD_TOKEN_HEADER) or ""
+    return asked.lower() == "bearer"
 
 
 class Unversioned:

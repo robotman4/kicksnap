@@ -1,6 +1,23 @@
 # Changelog
 
-Versions follow [semver](https://semver.org). Release images: `ghcr.io/robotman4/kicksnap:<version>`.
+Versions follow [semver](https://semver.org). Release images: `ghcr.io/robotman4/kiks:<version>` (`ghcr.io/robotman4/kicksnap` up to 1.0.0-beta.1).
+
+## Unreleased
+
+- **The app is now called Kiks.** App name, page title, home-screen name, notifications and docs say Kiks.
+  "Snap" stays as the verb.
+
+Operators, when upgrading:
+
+- The compose service is now `kiks` (was `kicksnap`): use `docker compose exec kiks ...` and `logs kiks`. Pull the
+  new `compose.yml` and run `docker compose up -d --remove-orphans` once, or the old `kicksnap` container keeps
+  running and holds the port. Update reverse-proxy targets (`kiks:8000`) and Traefik labels if you copied them.
+- Release images move to `ghcr.io/robotman4/kiks`.
+- Unchanged, so existing data just works: the `kicksnap-data` volume, `/data/kicksnap.db`, `/data/vapid.pem`, the
+  device cookie, env vars and passkeys. Nobody has to sign in again or re-enable push.
+- New backups are named `kiks-<time>`; `backup --keep` counts old `kicksnap-<time>` ones too.
+- QR codes now read `kiks:...`; old `kicksnap:...` codes still scan. Bearer clients send `X-Kiks-Auth: bearer`
+  (`X-Kicksnap-Auth` still works). The username `kiks` is reserved on upgrade unless someone already has it.
 
 ## 1.0.0-beta.1
 

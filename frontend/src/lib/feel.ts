@@ -35,6 +35,7 @@ export function ago(ts: number) {
   return `${Math.floor(s / 86400)}d`;
 }
 
+// stored under the pre-rename prefix so saved settings survive the rename to Kiks
 export const pref = {
   get(key: string, fallback: string) {
     try {

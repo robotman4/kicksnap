@@ -1,4 +1,4 @@
-# kicksnap
+# Kiks
 
 Self-hosted snap app. Open, snap, send. Snaps burn after they're viewed.
 
@@ -36,9 +36,9 @@ it behind a TLS reverse proxy (Caddy, Traefik, Pangolin, nginx...). Proxy exampl
 [docs/deploy.md](docs/deploy.md).
 
 Data (SQLite + media) lives in the `kicksnap-data` volume at `/data`. Back up `kicksnap.db` and `vapid.pem`:
-`docker compose exec -T kicksnap python -m app.admin backup --keep 14`.
+`docker compose exec -T kiks python -m app.admin backup --keep 14`.
 
-Release images are published as `ghcr.io/robotman4/kicksnap:<version>` (see [CHANGELOG.md](CHANGELOG.md)).
+Release images are published as `ghcr.io/robotman4/kiks:<version>` (see [CHANGELOG.md](CHANGELOG.md)).
 
 ### Notifications
 
@@ -73,12 +73,12 @@ turn notifications on again. Payloads only say who sent something, never the sna
 Nobody is admin by default. Whoever runs the server grants it from the shell:
 
 ```bash
-docker compose exec kicksnap python -m app.admin grant kim     # revoke / list too
-docker compose exec kicksnap python -m app.admin reports       # open reports
-docker compose exec kicksnap python -m app.admin suspend sam --days 7 --reason "harassment"
-docker compose exec kicksnap python -m app.admin appeals       # open appeals; lift with unsuspend
-docker compose exec kicksnap python -m app.admin delete sam    # --free-name to not reserve it
-docker compose exec kicksnap python -m app.admin reserve ceo "impersonation"
+docker compose exec kiks python -m app.admin grant kim     # revoke / list too
+docker compose exec kiks python -m app.admin reports       # open reports
+docker compose exec kiks python -m app.admin suspend sam --days 7 --reason "harassment"
+docker compose exec kiks python -m app.admin appeals       # open appeals; lift with unsuspend
+docker compose exec kiks python -m app.admin delete sam    # --free-name to not reserve it
+docker compose exec kiks python -m app.admin reserve ceo "impersonation"
 ```
 
 - Admins get an "admin" tile in their profile: open appeals and reports (with any snap, texts and screenshots the
@@ -115,7 +115,7 @@ cd backend && pip install -r requirements-dev.txt && python -m pytest
   for v1, so existing clients keep working. A breaking change ships as `/api/v2` next to it.
 - Docs: http://localhost:8000/api/v1/docs (OpenAPI at `/api/v1/openapi.json`).
 - Auth is either the `ks_device` cookie (the web app) or `Authorization: Bearer <secret>`, on HTTP and the socket.
-- To get a secret without a cookie, send `X-Kicksnap-Auth: bearer` on the call that signs a device in
+- To get a secret without a cookie, send `X-Kiks-Auth: bearer` on the call that signs a device in
   (`POST /devices/new`, the `GET /link/{code}` poll, `POST /passkeys/login/finish`). The response then carries
   `"token"` and no cookie is set. Store it in the Keychain/Keystore. `POST /auth/logout` with it revokes it.
 
@@ -123,7 +123,7 @@ cd backend && pip install -r requirements-dev.txt && python -m pytest
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
-kicksnap is licensed under the [GNU AGPL-3.0](LICENSE). If you run a modified version as a service, you must offer
+Kiks is licensed under the [GNU AGPL-3.0](LICENSE). If you run a modified version as a service, you must offer
 its source to your users.
 
 ## Stack

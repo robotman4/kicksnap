@@ -299,7 +299,7 @@ async def send_message(key: str, msg: NewMessage, user=Depends(current_user)):
         if kind == "u":
             conn.execute("INSERT INTO messages (sender_id, to_user, body, created_at) VALUES (?, ?, ?, ?)", (me, target["id"], body, now()))
             recipients = [(target["id"], f"u:{user['username']}")]
-            title = "kicksnap"
+            title = "Kiks"
         else:
             conn.execute("INSERT INTO messages (sender_id, group_id, body, created_at) VALUES (?, ?, ?, ?)", (me, target["id"], body, now()))
             recipients = [(m, key) for m in member_ids(conn, target["id"]) if m != me and not blocked(conn, me, m)]
@@ -462,7 +462,7 @@ async def invite(group_id: int, body: Invite, user=Depends(current_user)):
 
 @router.post("/groups/join", dependencies=[Depends(limit("join", 10, 60))])
 async def join(body: Join, user=Depends(current_user)):
-    code = body.code.strip().removeprefix("kicksnap-group:")
+    code = body.code.strip().removeprefix("kiks-group:").removeprefix("kicksnap-group:")
     with db() as conn:
         g = conn.execute("SELECT * FROM groups WHERE code = ?", (code,)).fetchone()
         if not g or g["invite_mode"] != "open":

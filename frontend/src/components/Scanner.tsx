@@ -28,7 +28,7 @@ async function makeDetector(): Promise<Detect> {
   };
 }
 
-/** Full-screen QR scanner with a "type it instead" fallback. Accepts anything starting with kicksnap. */
+/** Full-screen QR scanner with a "type it instead" fallback. Accepts anything starting with kiks (or kicksnap, from before the rename). */
 export function Scanner({ hint, onClose, onCode }: { hint: string; onClose: () => void; onCode: (c: string) => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const cb = useRef({ onClose, onCode });
@@ -52,7 +52,7 @@ export function Scanner({ hint, onClose, onCode }: { hint: string; onClose: () =
           if (video.current?.readyState === 4) {
             const hit = await detect(video.current);
             if (dead) return;
-            if (hit?.toLowerCase().startsWith("kicksnap")) return cb.current.onCode(hit);
+            if (hit && /^(kiks|kicksnap)/i.test(hit)) return cb.current.onCode(hit);
           }
           raf = requestAnimationFrame(tick);
         };

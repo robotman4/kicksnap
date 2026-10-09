@@ -116,3 +116,13 @@ def test_logout_kills_token(new_user):
     u = new_user()
     assert u.post("/api/v1/auth/logout").status_code == 200
     assert u.get("/api/v1/me").status_code == 401
+
+
+def test_names_from_before_the_rename_still_work(client, new_user):
+    # bearer clients built against the old header
+    r = client.post("/api/v1/devices/new", headers={"X-Kicksnap-Auth": "bearer"})
+    assert r.json()["token"]
+    # friend QR codes made before the rename
+    a, b = new_user(), new_user()
+    assert a.post("/api/v1/friends", json={"username": f"kicksnap:{b.name}"}).json()["status"] == "requested"
+    assert b.post("/api/v1/friends", json={"username": f"kiks:{a.name}"}).json()["status"] == "friends"

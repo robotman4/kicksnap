@@ -19,7 +19,7 @@ const SECTIONS: [string, string[]][] = [
   [
     "The short version",
     [
-      "kicksnap is a small app run by whoever runs this server. You use it as it is, at your own risk.",
+      "Kiks is a small app run by whoever runs this server. You use it as it is, at your own risk.",
       "You are responsible for what you send. We are not responsible for what anyone sends, or for what the people you send to do with it.",
     ],
   ],

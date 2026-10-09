@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 # the app reads DATA_DIR at import time, so point it at a scratch dir first
-os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="kicksnap-test-")
+os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="kiks-test-")
 os.environ["STATIC_DIR"] = "/nonexistent"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -51,7 +51,7 @@ class User:
 @pytest.fixture
 def new_user(client):
     def make(prefix="user") -> User:
-        r = client.post("/api/v1/devices/new", headers={"X-Kicksnap-Auth": "bearer"})
+        r = client.post("/api/v1/devices/new", headers={"X-Kiks-Auth": "bearer"})
         assert r.status_code == 200, r.text
         token = r.json()["token"]
         name = f"{prefix}{next(_names)}"

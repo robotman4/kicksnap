@@ -15,8 +15,8 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app ./app
 COPY --from=web /web/dist ./static
-RUN useradd -r -u 10001 kicksnap && mkdir -p /data && chown kicksnap /data
-USER kicksnap
+RUN useradd -r -u 10001 kiks && mkdir -p /data && chown kiks /data
+USER kiks
 VOLUME /data
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')"

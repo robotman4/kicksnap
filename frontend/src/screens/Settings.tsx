@@ -72,7 +72,7 @@ export function Settings({
 
   const togglePush = async () => {
     buzz(8);
-    if (push === "install-first") return toast("tap Share → Add to Home Screen, then open kicksnap from there");
+    if (push === "install-first") return toast("tap Share → Add to Home Screen, then open Kiks from there");
     if (push === "denied") return toast("notifications are blocked in your browser settings");
     if (push === "unsupported") return toast("this browser can't do notifications");
     const next = push === "on" ? await disablePush() : await enablePush().catch(() => "off" as const);
@@ -94,7 +94,7 @@ export function Settings({
   const approve = async (code: string) => {
     setScanning(false);
     try {
-      await api.linkApprove(code.replace(/^kicksnap-link:/i, ""));
+      await api.linkApprove(code.replace(/^(kiks|kicksnap)-link:/i, ""));
       buzz([10, 50, 20]);
       toast("device added ✨");
       setTimeout(load, 2500);

@@ -13,7 +13,7 @@ Only the latest release and the `main` branch get security fixes.
 
 ## In scope
 
-- The kicksnap server (`backend/`) and web app (`frontend/`): auth, device linking, passkeys, bearer tokens,
+- The Kiks server (`backend/`) and web app (`frontend/`): auth, device linking, passkeys, bearer tokens,
   access to snaps, texts and groups, admin endpoints, media handling, rate limits.
 - The container image and `compose.yml` defaults.
 

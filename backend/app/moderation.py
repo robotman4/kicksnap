@@ -62,7 +62,7 @@ async def tell_admins(queue_was_empty: bool, what: str):
         admins = [r[0] for r in conn.execute("SELECT id FROM users WHERE is_admin = 1")]
     if queue_was_empty:
         for a in admins:
-            asyncio.create_task(notify(a, {"title": "kicksnap", "body": f"there's {what} to look at", "tag": "admin-reports"}))
+            asyncio.create_task(notify(a, {"title": "Kiks", "body": f"there's {what} to look at", "tag": "admin-reports"}))
     for a in admins:
         await hub.push(a, {"type": "reports"})
 

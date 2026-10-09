@@ -25,11 +25,11 @@ export function Friends({
   const [scanning, setScanning] = useState(false);
 
   useEffect(() => {
-    QRCode.toDataURL(`kicksnap:${me.username}`, { margin: 1, width: 480, color: { dark: "#000000", light: "#00000000" } }).then(setQr);
+    QRCode.toDataURL(`kiks:${me.username}`, { margin: 1, width: 480, color: { dark: "#000000", light: "#00000000" } }).then(setQr);
   }, [me.username]);
 
   const add = async (raw: string) => {
-    const n = raw.trim().toLowerCase().replace(/^kicksnap:/, "").replace(/^@/, "");
+    const n = raw.trim().toLowerCase().replace(/^(kiks|kicksnap):/, "").replace(/^@/, "");
     if (!n) return;
     try {
       const r = await api.addFriend(n);
@@ -134,13 +134,13 @@ export function Friends({
           onClose={() => setScanning(false)}
           onCode={(code) => {
             setScanning(false);
-            if (/^kicksnap-group:/i.test(code)) {
+            if (/^(kiks|kicksnap)-group:/i.test(code)) {
               api.joinGroup(code).then(
                 (g) => (buzz(12), toast(`you're in ${g.name} 🎉`), onChanged()),
                 (e) => toast(e.message)
               );
-            } else if (/^kicksnap-link:/i.test(code)) {
-              api.linkApprove(code.replace(/^kicksnap-link:/i, "")).then(
+            } else if (/^(kiks|kicksnap)-link:/i.test(code)) {
+              api.linkApprove(code.replace(/^(kiks|kicksnap)-link:/i, "")).then(
                 () => toast("device added ✨"),
                 (e) => toast(e.message)
               );

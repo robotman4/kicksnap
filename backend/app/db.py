@@ -6,7 +6,7 @@ from pathlib import Path
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
 MEDIA_DIR = DATA_DIR / "media"
-DB_PATH = DATA_DIR / "kicksnap.db"
+DB_PATH = DATA_DIR / "kicksnap.db"  # kept from before the rename to Kiks, so upgrades find their data
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -207,8 +207,18 @@ def _m1_groups_and_admin(conn) -> None:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
 
 
-MIGRATIONS = [_m1_groups_and_admin]
-RESERVED = ("admin", "root", "support", "kicksnap", "moderator", "mod", "help", "system")
+def _m2_reserve_kiks(conn) -> None:
+    """The app is called Kiks now: keep the new name from being registered (if nobody has it)."""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'reserved_usernames'").fetchone() and not conn.execute(
+        "SELECT 1 FROM users WHERE username = 'kiks'"
+    ).fetchone():
+        conn.execute(
+            "INSERT OR IGNORE INTO reserved_usernames (name, reason, created_at, created_by) VALUES ('kiks', 'reserved', strftime('%s','now'), 'system')"
+        )
+
+
+MIGRATIONS = [_m1_groups_and_admin, _m2_reserve_kiks]
+RESERVED = ("admin", "root", "support", "kiks", "kicksnap", "moderator", "mod", "help", "system")
 
 
 def schema_version(conn) -> int:

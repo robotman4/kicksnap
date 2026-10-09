@@ -10,7 +10,7 @@ from collections import deque
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-log = logging.getLogger("kicksnap")
+log = logging.getLogger("kiks")
 _recent: deque[float] = deque(maxlen=1000)
 
 

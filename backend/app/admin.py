@@ -14,7 +14,7 @@ Server-shell admin tool. Shell access is what proves you run the server.
     python -m app.admin backup [dir] [--keep N]   database + vapid.pem, safe while running
     python -m app.admin version
 
-In Docker: docker compose exec kicksnap python -m app.admin grant kim
+In Docker: docker compose exec kiks python -m app.admin grant kim
 """
 import argparse
 import shutil
@@ -38,7 +38,7 @@ def _user(conn, name: str):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="python -m app.admin", description="kicksnap admin")
+    p = argparse.ArgumentParser(prog="python -m app.admin", description="Kiks admin")
     sub = p.add_subparsers(dest="cmd", required=True)
     for c in ("grant", "revoke", "unsuspend", "release"):
         sub.add_parser(c).add_argument("name")
@@ -64,7 +64,7 @@ def main(argv=None):
     store.init()
     if a.cmd == "version":
         with db() as conn:
-            print(f"kicksnap {__version__}, schema {store.schema_version(conn)}")
+            print(f"Kiks {__version__}, schema {store.schema_version(conn)}")
         return
     if a.cmd == "backup":
         backup(Path(a.dir), a.keep)
@@ -121,15 +121,16 @@ def main(argv=None):
 
 
 def backup(folder: Path, keep: int = 0) -> Path:
-    """<folder>/kicksnap-<UTC time>/ with kicksnap.db and vapid.pem. Media isn't kept: it burns anyway."""
-    dest = folder / time.strftime("kicksnap-%Y%m%d-%H%M%S", time.gmtime())
+    """<folder>/kiks-<UTC time>/ with kicksnap.db and vapid.pem (the data file keeps its old name). Media isn't kept: it burns anyway."""
+    dest = folder / time.strftime("kiks-%Y%m%d-%H%M%S", time.gmtime())
     store.backup(dest / "kicksnap.db")
     vapid = DATA_DIR / "vapid.pem"
     if vapid.exists():
         shutil.copy2(vapid, dest / "vapid.pem")
     print(dest)
     if keep > 0:
-        old = sorted(p for p in folder.glob("kicksnap-*") if p.is_dir())[:-keep]
+        # older backups were named kicksnap-<time>; sort by the time part so both count
+        old = sorted((p for p in [*folder.glob("kiks-*"), *folder.glob("kicksnap-*")] if p.is_dir()), key=lambda p: p.name.split("-", 1)[1])[:-keep]
         for p in old:
             shutil.rmtree(p)
             print(f"removed {p}")

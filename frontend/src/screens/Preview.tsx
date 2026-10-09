@@ -212,7 +212,7 @@ export function Preview({
       if (!blob) continue;
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `kicksnap-${Date.now()}.${ext}`;
+      a.download = `kiks-${Date.now()}.${ext}`;
       a.click();
     }
     buzz(8);

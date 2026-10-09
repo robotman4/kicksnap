@@ -1,4 +1,4 @@
-# Running kicksnap
+# Running Kiks
 
 One container, one volume. Everything here is for the person running the server.
 
@@ -10,21 +10,21 @@ cp .env.example .env        # set VAPID_SUBJECT, and FORWARDED_ALLOW_IPS (below)
 docker compose up -d --build
 ```
 
-Or use a release image instead of building: in `compose.yml` replace `build: .` and `image: kicksnap:latest` with
+Or use a release image instead of building: in `compose.yml` replace `build: .` and `image: kiks:latest` with
 
 ```yaml
-    image: ghcr.io/robotman4/kicksnap:1.0.0-beta.1
+    image: ghcr.io/robotman4/kiks:1.0.0-beta.1
 ```
 
 Then make yourself admin, after you've picked your name in the app:
 
 ```bash
-docker compose exec kicksnap python -m app.admin grant <yourname>
+docker compose exec kiks python -m app.admin grant <yourname>
 ```
 
 ## Reverse proxy (HTTPS)
 
-Browsers only allow camera, passkeys, push and the service worker on `https://`. kicksnap speaks plain HTTP on
+Browsers only allow camera, passkeys, push and the service worker on `https://`. Kiks speaks plain HTTP on
 port 8000, so put any TLS reverse proxy in front. It needs to:
 
 - pass WebSocket upgrades (`/api/v1/ws`, `/ws`),
@@ -37,19 +37,19 @@ Caddy, Traefik and Pangolin do all of this by default. nginx needs the WebSocket
 
 ```caddyfile
 snap.example.com {
-    reverse_proxy kicksnap:8000
+    reverse_proxy kiks:8000
 }
 ```
 
-### Traefik (labels on the kicksnap service)
+### Traefik (labels on the kiks service)
 
 ```yaml
     labels:
       - traefik.enable=true
-      - traefik.http.routers.kicksnap.rule=Host(`snap.example.com`)
-      - traefik.http.routers.kicksnap.entrypoints=websecure
-      - traefik.http.routers.kicksnap.tls.certresolver=letsencrypt
-      - traefik.http.services.kicksnap.loadbalancer.server.port=8000
+      - traefik.http.routers.kiks.rule=Host(`snap.example.com`)
+      - traefik.http.routers.kiks.entrypoints=websecure
+      - traefik.http.routers.kiks.tls.certresolver=letsencrypt
+      - traefik.http.services.kiks.loadbalancer.server.port=8000
 ```
 
 Pangolin is Traefik underneath: point a resource at the container's port 8000 and that's it.
@@ -67,7 +67,7 @@ reach the port (for example the port isn't published, or is firewalled to the pr
 FORWARDED_ALLOW_IPS=172.18.0.1
 ```
 
-To find it: `docker compose logs kicksnap` shows the client IP on each request. If every line has the same
+To find it: `docker compose logs kiks` shows the client IP on each request. If every line has the same
 `172.x`/`10.x` address, that's your proxy and it isn't trusted yet.
 
 ### Checking it works
@@ -82,7 +82,7 @@ Application → Cookies → `ks_device` has the Secure box ticked.
 
 `curl https://snap.example.com/api/v1/health` shows the running version, whether the database answers (503 if
 not, so it works for uptime monitors), and how many unhandled errors happened in the last hour. The errors
-themselves, with tracebacks, are in `docker compose logs kicksnap`.
+themselves, with tracebacks, are in `docker compose logs kiks`.
 
 ## Configuration
 
@@ -105,17 +105,17 @@ Don't `cp` the database while it runs: with WAL mode a plain copy can be inconsi
 which is safe while the app is running:
 
 ```bash
-# writes /data/backups/kicksnap-<UTC time>/{kicksnap.db,vapid.pem}, keeps the newest 14
-docker compose exec -T kicksnap python -m app.admin backup --keep 14
+# writes /data/backups/kiks-<UTC time>/{kicksnap.db,vapid.pem}, keeps the newest 14
+docker compose exec -T kiks python -m app.admin backup --keep 14
 
 # copy them off the volume
-docker compose cp kicksnap:/data/backups ./backups
+docker compose cp kiks:/data/backups ./backups
 ```
 
 Nightly from the host's crontab:
 
 ```cron
-30 3 * * * cd /opt/kicksnap && docker compose exec -T kicksnap python -m app.admin backup --keep 14 && docker compose cp kicksnap:/data/backups ./backups
+30 3 * * * cd /opt/kicksnap && docker compose exec -T kiks python -m app.admin backup --keep 14 && docker compose cp kiks:/data/backups ./backups
 ```
 
 Then ship `./backups` off the box with whatever you already use (restic, borg, rsync).
@@ -123,10 +123,10 @@ Then ship `./backups` off the box with whatever you already use (restic, borg, r
 ### Restore
 
 ```bash
-docker compose stop kicksnap
-docker run --rm -v kicksnap_kicksnap-data:/data -v "$PWD/backups/kicksnap-20261009-033000:/b:ro" alpine sh -c \
+docker compose stop kiks
+docker run --rm -v kicksnap_kicksnap-data:/data -v "$PWD/backups/kiks-20261009-033000:/b:ro" alpine sh -c \
   'cp /b/kicksnap.db /b/vapid.pem /data/ && rm -f /data/kicksnap.db-wal /data/kicksnap.db-shm && chown 10001 /data/kicksnap.db /data/vapid.pem && chmod 600 /data/vapid.pem'
-docker compose start kicksnap
+docker compose start kiks
 ```
 
 (The volume is `<compose project>_kicksnap-data`; `docker volume ls` shows the exact name.)
@@ -134,9 +134,9 @@ docker compose start kicksnap
 ## Upgrading
 
 ```bash
-docker compose exec -T kicksnap python -m app.admin backup     # always, first
+docker compose exec -T kiks python -m app.admin backup     # always, first
 git pull && docker compose up -d --build                       # or bump the image tag and `docker compose pull`
-docker compose exec kicksnap python -m app.admin version       # version and schema number
+docker compose exec kiks python -m app.admin version       # version and schema number
 ```
 
 Database migrations run by themselves on start. They only go forward: to roll back to an older version, restore
@@ -144,5 +144,5 @@ the backup you made before upgrading. Read [CHANGELOG.md](../CHANGELOG.md) befor
 
 ## Admin from the shell
 
-`docker compose exec kicksnap python -m app.admin --help` lists everything: grant/revoke admin, open reports,
+`docker compose exec kiks python -m app.admin --help` lists everything: grant/revoke admin, open reports,
 suspend, delete, reserve/release names, backup, version.

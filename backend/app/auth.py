@@ -30,7 +30,7 @@ COOKIE_MAX_AGE = 400 * 24 * 3600  # browsers cap at ~400 days; refreshed on use
 LINK_TTL = 300
 SEEN_EVERY = 600  # seconds between "last active" updates per device
 USERNAME_RE = re.compile(r"^[a-z0-9_.]{3,20}$")
-RP_NAME = "kicksnap"
+RP_NAME = "Kiks"
 
 router = APIRouter(prefix=API)
 
@@ -243,7 +243,7 @@ def link_poll(code: str, secret: str, request: Request, response: Response):
 def link_approve(code: str, ks_device: str | None = Depends(device_token)):
     user = current_user(ks_device)
     _prune()
-    link = _links.get(code.strip().upper().removeprefix("KICKSNAP-LINK:"))
+    link = _links.get(code.strip().upper().removeprefix("KIKS-LINK:").removeprefix("KICKSNAP-LINK:"))
     if not link or link["user_id"]:
         raise HTTPException(410, "that code expired, make a new one")
     link["user_id"] = user["id"]
