@@ -16,9 +16,31 @@ export async function updateAvailable(): Promise<boolean> {
   }
 }
 
-/** Reload into the latest build; the service worker serves the shell network-first. */
-export async function reloadApp() {
+const FLAG = "ks-updated";
+
+/** Reload into the latest build; the service worker serves the shell network-first.
+ *  `celebrate`: the new build throws confetti when it loads (the "update available" button). */
+export async function reloadApp(celebrate = false) {
+  if (celebrate) {
+    try {
+      sessionStorage.setItem(FLAG, "1");
+    } catch {
+      // private mode etc.: just no confetti
+    }
+  }
   const reg = await navigator.serviceWorker?.getRegistration().catch(() => undefined);
   await reg?.update().catch(() => {});
   location.reload();
+}
+
+/** Called once at startup: confetti if we just reloaded into an update. */
+export function celebrateIfUpdated() {
+  let updated = false;
+  try {
+    updated = sessionStorage.getItem(FLAG) === "1";
+    sessionStorage.removeItem(FLAG);
+  } catch {
+    return;
+  }
+  if (updated) setTimeout(() => import("./confetti").then((m) => m.confetti()), 400);
 }
