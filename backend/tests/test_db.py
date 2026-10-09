@@ -37,7 +37,9 @@ def test_pre_migration_database_upgrades_and_keeps_data(monkeypatch, tmp_path):
     conn.row_factory = sqlite3.Row
     assert conn.execute("PRAGMA user_version").fetchone()[0] == len(store.MIGRATIONS)
     assert {"is_admin", "suspended_at", "suspended_until", "suspend_reason"} <= {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    assert "group_id" in {r["name"] for r in conn.execute("PRAGMA table_info(snaps)")}
+    assert {"group_id", "e2e", "envelope"} <= {r["name"] for r in conn.execute("PRAGMA table_info(snaps)")}
+    assert "identity_key" in {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    assert "enc_key" in {r["name"] for r in conn.execute("PRAGMA table_info(devices)")}
     assert conn.execute("SELECT username FROM users").fetchone()[0] == "old"
 
 

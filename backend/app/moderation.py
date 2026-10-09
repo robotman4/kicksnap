@@ -5,6 +5,7 @@ Admins are flagged from the server shell (python -m app.admin grant <name>).
 Every admin action lands in admin_log.
 """
 import asyncio
+import json
 import secrets
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from .chat import are_friends
 from .db import MEDIA_DIR, db
 from .hub import hub
 from .limits import limit
+from .keys import sha, signed_by, snap_signed_text, text_signed_text
 from .media import save_upload
 from .push import notify
 from .safety import any_named_user, tell_gone, wipe
@@ -46,7 +48,7 @@ def drop_media(conn, where: str, args: tuple):
     ids = f"SELECT id FROM reports WHERE {where}"
     for r in conn.execute(f"SELECT file FROM report_items WHERE file IS NOT NULL AND report_id IN ({ids})", args).fetchall():
         report_file(r[0]).unlink(missing_ok=True)
-    conn.execute(f"DELETE FROM report_items WHERE kind = 'image' AND report_id IN ({ids})", args)
+    conn.execute(f"DELETE FROM report_items WHERE kind IN ('image', 'overlay') AND report_id IN ({ids})", args)
 
 
 def queue_empty(conn) -> bool:
@@ -67,17 +69,19 @@ async def tell_admins(queue_was_empty: bool, what: str):
         await hub.push(a, {"type": "reports"})
 
 
-def their_texts(conn, me: int, them: int, ids: list[int] | None = None, limit: int = 30):
-    """Texts `them` sent that `me` could see: to me directly, or in a group I'm in."""
+def their_texts(conn, me: int, them: int, ids: list[int] | None = None, limit: int = 30, device: int = 0):
+    """Texts `them` sent that `me` could see: to me directly, or in a group I'm in.
+    E2E texts come with the wrapped key for `device`, so the reporter can decrypt and pick."""
     pick = f"AND m.id IN ({','.join('?' * len(ids))})" if ids else ""
     return conn.execute(
-        f"""SELECT m.id, m.body, m.created_at, g.name AS group_name
+        f"""SELECT m.id, m.body, m.created_at, m.e2e, m.group_id, g.name AS group_name, k.key
             FROM messages m LEFT JOIN groups g ON g.id = m.group_id
+            LEFT JOIN message_keys k ON k.message_id = m.id AND k.device_id = ?
             WHERE m.sender_id = ?
               AND (m.to_user = ? OR m.group_id IN (SELECT group_id FROM group_members WHERE user_id = ?))
               {pick}
             ORDER BY m.created_at DESC, m.id DESC LIMIT ?""",
-        (them, me, me, *(ids or []), limit),
+        (device, them, me, me, *(ids or []), limit),
     ).fetchall()
 
 
@@ -102,8 +106,24 @@ def report_texts(username: str, user=Depends(current_user)):
     """Their recent texts you can pick as proof (texts burn after 24h, so this is what's left)."""
     with db() as conn:
         other = _named(conn, username, user["id"])
-        rows = their_texts(conn, user["id"], other["id"])
-    return [{"id": r["id"], "body": r["body"], "at": r["created_at"], "group": r["group_name"]} for r in rows]
+        rows = their_texts(conn, user["id"], other["id"], device=user["device_id"])
+    return [
+        {"id": r["id"], "body": r["body"], "at": r["created_at"], "group": r["group_name"], "e2e": bool(r["e2e"]), "key": r["key"],
+         "to": f"g:{r['group_id']}" if r["group_id"] else f"u:{user['username']}"}
+        for r in rows
+    ]
+
+
+def _json_form(raw: str, kind: type):
+    if not raw:
+        return None
+    try:
+        out = json.loads(raw)
+    except ValueError:
+        raise HTTPException(400, "bad proof")
+    if not isinstance(out, kind):
+        raise HTTPException(400, "bad proof")
+    return out
 
 
 @router.post("/reports", dependencies=[Depends(limit("report", 10, 3600))])
@@ -113,12 +133,19 @@ async def report(
     note: str = Form(""),
     block: bool = Form(True),
     file: UploadFile | None = File(None),
+    overlay: UploadFile | None = File(None),
+    snap_proof: str = Form(""),
     message_ids: list[int] = Form([]),
+    text_proofs: str = Form(""),
     shots: list[UploadFile] = File([]),
     user=Depends(current_user),
 ):
     """Report someone. Proof is optional: the snap you were looking at, texts of theirs you could
-    see (copied now, since texts burn), and up to 3 screenshots. Blocks them too by default."""
+    see (copied now, since texts burn), and up to 3 screenshots. Blocks them too by default.
+
+    Snaps and texts are end-to-end encrypted, so the reporter's app sends what it decrypted
+    plus the sender's signature (docs/e2e.md). We check it, so admins can see whether the
+    proof is really from them."""
     me = user["id"]
     if reason not in REASONS:
         raise HTTPException(400, "pick a reason")
@@ -130,11 +157,33 @@ async def report(
         raise HTTPException(400, f"up to {MAX_SHOTS} screenshots")
     if any(not (f.content_type or "").startswith("image/") for f in shots):
         raise HTTPException(400, "screenshots must be images")
+    proofs = {int(p.get("id", 0)): p for p in (_json_form(text_proofs, list) or []) if isinstance(p, dict)}
+    sproof = _json_form(snap_proof, dict)
     with db() as conn:
         other = _named(conn, username, me)
+        identity = conn.execute("SELECT identity_key FROM users WHERE id = ?", (other["id"],)).fetchone()["identity_key"]
         texts = their_texts(conn, me, other["id"], list(dict.fromkeys(message_ids)), MAX_TEXTS) if message_ids else []
         if len(texts) != len(set(message_ids)):
             raise HTTPException(400, "some of those texts are gone, pick again")
+        # (body, place, at, verified) per text; E2E ones carry what the reporter decrypted
+        copies = []
+        for t in sorted(texts, key=lambda t: (t["created_at"], t["id"])):
+            if not t["e2e"]:
+                copies.append((t["body"], t["group_name"] or "direct", t["created_at"], None))
+                continue
+            p = proofs.get(t["id"])
+            if not p or not isinstance(p.get("body"), str):
+                raise HTTPException(400, "some of those texts couldn't be read, pick again")
+            to = f"g:{t['group_id']}" if t["group_id"] else f"u:{user['username']}"
+            ok = signed_by(identity, str(p.get("sig", "")), text_signed_text(other["username"], to, p))
+            copies.append((p["body"][:2000], t["group_name"] or "direct", t["created_at"], int(ok)))
+        snap_row = None
+        if sproof:
+            snap_row = conn.execute(
+                """SELECT s.id, s.group_id, s.sender_id FROM snaps s JOIN deliveries d ON d.snap_id = s.id
+                   WHERE s.id = ? AND d.recipient_id = ? AND s.e2e = 1""",
+                (str(sproof.get("snap_id", "")), me),
+            ).fetchone()
         was_friend = are_friends(conn, me, other["id"])
         queue_was_empty = queue_empty(conn)
 
@@ -146,6 +195,19 @@ async def report(
         REPORT_DIR.mkdir(parents=True, exist_ok=True)
         media = secrets.token_urlsafe(16)
         await save_upload(file, report_file(media), MAX_REPORT_MB * 1024 * 1024)
+    media_verified = None
+    overlay_name = None
+    if media and sproof:
+        media_verified = 0
+        if overlay and overlay.filename:
+            overlay_name = secrets.token_urlsafe(16)
+            await save_upload(overlay, report_file(overlay_name), 5 * 1024 * 1024)
+        if snap_row and snap_row["sender_id"] == other["id"]:
+            to = f"g:{snap_row['group_id']}" if snap_row["group_id"] else f"u:{user['username']}"
+            media_hash = sha(report_file(media).read_bytes())
+            overlay_ok = (sproof.get("overlay") or None) == (sha(report_file(overlay_name).read_bytes()) if overlay_name else None)
+            signed = signed_by(identity, str(sproof.get("sig", "")), snap_signed_text(other["username"], to, sproof, media_hash))
+            media_verified = int(signed and overlay_ok)
     saved = []
     try:
         for f in shots:
@@ -154,20 +216,24 @@ async def report(
             await save_upload(f, report_file(name), MAX_SHOT_MB * 1024 * 1024)
             saved.append((name, f.content_type))
     except HTTPException:
-        for name in [n for n, _ in saved] + ([media] if media else []):
+        for name in [n for n, _ in saved] + [n for n in (media, overlay_name) if n]:
             report_file(name).unlink(missing_ok=True)
         raise
 
     with db() as conn:
         rid = conn.execute(
-            """INSERT INTO reports (reporter_id, reporter_name, reported_id, reported_name, reason, note, media, media_mime, was_friend, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (me, user["username"], other["id"], other["username"], reason, note, media, mime, int(was_friend), now()),
+            """INSERT INTO reports (reporter_id, reporter_name, reported_id, reported_name, reason, note, media, media_mime, was_friend, created_at, media_verified)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (me, user["username"], other["id"], other["username"], reason, note, media, mime, int(was_friend), now(), media_verified),
         ).lastrowid
-        for t in sorted(texts, key=lambda t: (t["created_at"], t["id"])):
+        conn.executemany(
+            "INSERT INTO report_items (report_id, kind, body, place, at, verified) VALUES (?, 'text', ?, ?, ?, ?)",
+            [(rid, *c) for c in copies],
+        )
+        if overlay_name:
             conn.execute(
-                "INSERT INTO report_items (report_id, kind, body, place, at) VALUES (?, 'text', ?, ?, ?)",
-                (rid, t["body"], t["group_name"] or "direct", t["created_at"]),
+                "INSERT INTO report_items (report_id, kind, file, mime, at) VALUES (?, 'overlay', ?, 'image/png', ?)",
+                (rid, overlay_name, now()),
             )
         for name, shot_mime in saved:
             conn.execute(
@@ -232,7 +298,11 @@ def open_reports(admin=Depends(admin_user)):
             "note": r["note"],
             "media": f"{API}/admin/reports/{r['id']}/media" if r["media"] else None,
             "media_kind": ("video" if (r["media_mime"] or "").startswith("video/") else "photo") if r["media"] else None,
-            "texts": [{"body": i["body"], "at": i["at"], "group": None if i["place"] == "direct" else i["place"]}
+            # None: sent before E2E (the server copied it itself); True/False: the sender's signature checked out or not
+            "media_verified": None if r["media_verified"] is None else bool(r["media_verified"]),
+            "overlay": next((f"{API}/admin/reports/{r['id']}/shots/{i['id']}" for i in items.get(r["id"], []) if i["kind"] == "overlay"), None),
+            "texts": [{"body": i["body"], "at": i["at"], "group": None if i["place"] == "direct" else i["place"],
+                       "verified": None if i["verified"] is None else bool(i["verified"])}
                       for i in items.get(r["id"], []) if i["kind"] == "text"],
             "shots": [f"{API}/admin/reports/{r['id']}/shots/{i['id']}" for i in items.get(r["id"], []) if i["kind"] == "image"],
             "was_friend": bool(r["was_friend"]),

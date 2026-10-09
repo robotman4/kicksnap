@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import re
 import secrets
@@ -22,6 +23,7 @@ from .chat import are_friends, blocked, member_ids, router as chat_router
 from .hub import hub
 from .media import burn, media_path, overlay_path, save_upload
 from .push import notify, router as push_router
+from .keys import router as keys_router, wraps_for
 from .moderation import router as moderation_router
 from .safety import router as safety_router
 
@@ -39,6 +41,7 @@ app.include_router(push_router)
 app.include_router(chat_router)
 app.include_router(safety_router)
 app.include_router(moderation_router)
+app.include_router(keys_router)
 
 
 def now() -> int:
@@ -84,7 +87,7 @@ def friends(user=Depends(current_user)):
     with db() as conn:
         rows = conn.execute(
             """
-            SELECT u.username, u.color,
+            SELECT u.username, u.color, u.identity_key,
                    EXISTS(SELECT 1 FROM friendships f WHERE f.user_id = :me AND f.friend_id = u.id) AS out,
                    EXISTS(SELECT 1 FROM friendships f WHERE f.user_id = u.id AND f.friend_id = :me) AS inc
             FROM users u
@@ -97,7 +100,7 @@ def friends(user=Depends(current_user)):
     result = {"friends": [], "incoming": [], "outgoing": []}
     for r in rows:
         key = "friends" if r["out"] and r["inc"] else "outgoing" if r["out"] else "incoming"
-        result[key].append({"username": r["username"], "color": r["color"]})
+        result[key].append({"username": r["username"], "color": r["color"], "key": r["identity_key"]})
     return result
 
 
@@ -108,7 +111,8 @@ class AddFriend(BaseModel):
 @app.post(API + "/friends", dependencies=[Depends(limit("friend", 30, 60))])
 async def add_friend(body: AddFriend, user=Depends(current_user)):
     """Send a request, or accept one if they already added you."""
-    name = body.username.strip().lower().removeprefix("kiks:").removeprefix("kicksnap:")
+    # a friend's QR code is kiks:<name>#<identity key> (kicksnap: before the rename)
+    name = body.username.strip().lower().removeprefix("kiks:").removeprefix("kicksnap:").split("#")[0].lstrip("@")
     with db() as conn:
         other = conn.execute("SELECT * FROM users WHERE username = ?", (name,)).fetchone()
         # a block looks the same as no such person, from both sides
@@ -151,26 +155,37 @@ async def send_snap(
     to: str = Form(""),
     groups: str = Form(""),
     seconds: int = Form(5),
+    kind: str = Form(""),
+    envelope: str = Form(""),
+    keys: str = Form(""),
     user=Depends(current_user),
 ):
+    """
+    An end-to-end encrypted snap (docs/e2e.md): the file and overlay are ciphertext, `envelope`
+    holds the encrypted details, `keys` the content key wrapped per device and conversation.
+    """
     names = {n.strip().lower() for n in to.split(",") if n.strip()}
     group_ids = {int(g) for g in groups.split(",") if g.strip().isdigit()}
+    if not envelope or not keys:
+        raise HTTPException(426, "update kicksnap to send snaps (refresh the app)")
     if not names and not group_ids:
         raise HTTPException(400, "pick someone")
     if seconds not in VIEW_SECONDS:
         raise HTTPException(400, "bad timer")
-    mime = file.content_type or "application/octet-stream"
-    kind = "video" if mime.startswith("video/") else "photo" if mime.startswith("image/") else None
-    if not kind:
+    if kind not in ("photo", "video"):
         raise HTTPException(400, "photos and videos only")
+    if len(envelope) > 4096:
+        raise HTTPException(400, "envelope too big")
+    try:
+        wrapped = json.loads(keys)
+        assert isinstance(wrapped, dict) and all(isinstance(v, dict) for v in wrapped.values())
+    except (ValueError, AssertionError):
+        raise HTTPException(400, "bad keys")
 
     snap_id = secrets.token_urlsafe(16)
     await save_upload(file, media_path(snap_id), MAX_UPLOAD_MB * 1024 * 1024)
     has_overlay = bool(overlay and overlay.filename)
     if has_overlay:
-        if overlay.content_type != "image/png":
-            burn(snap_id)
-            raise HTTPException(400, "overlay must be png")
         await save_upload(overlay, overlay_path(snap_id), 5 * 1024 * 1024)
 
     me = user["id"]
@@ -201,11 +216,16 @@ async def send_snap(
                 if has_overlay:
                     shutil.copyfile(overlay_path(snap_id), overlay_path(sid))
             conn.execute(
-                "INSERT INTO snaps (id, sender_id, kind, mime, seconds, has_overlay, created_at, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (sid, me, kind, mime, seconds, int(has_overlay), now(), gid),
+                "INSERT INTO snaps (id, sender_id, kind, mime, seconds, has_overlay, created_at, group_id, e2e, envelope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                (sid, me, kind, "application/octet-stream", seconds, int(has_overlay), now(), gid, envelope),
             )
             conn.executemany(
                 "INSERT INTO deliveries (snap_id, recipient_id) VALUES (?, ?)", [(sid, r["id"]) for r in recipients]
+            )
+            conv = wrapped.get(f"g:{gid}" if gid else "u", {})
+            conn.executemany(
+                "INSERT OR REPLACE INTO snap_keys (snap_id, device_id, key) VALUES (?, ?, ?)",
+                [(sid, d, w) for d, w in wraps_for(conn, conv, {r["id"] for r in recipients})],
             )
             sent.append((sid, gid, recipients))
     for _, gid, recipients in sent:
@@ -236,13 +256,31 @@ def snap_media(snap_id: str, user=Depends(current_user)):
     return FileResponse(media_path(snap_id), media_type=row["mime"], headers={"Cache-Control": "no-store"})
 
 
+@app.get(API + "/snaps/{snap_id}/key")
+def snap_key(snap_id: str, user=Depends(current_user)):
+    """The envelope and this device's wrapped key (null: sent before this device was set up)."""
+    with db() as conn:
+        row = _delivery(conn, snap_id, user["id"])
+        key = conn.execute(
+            "SELECT key FROM snap_keys WHERE snap_id = ? AND device_id = ?", (snap_id, user["device_id"])
+        ).fetchone()
+        sender = conn.execute("SELECT username FROM users WHERE id = ?", (row["sender_id"],)).fetchone()
+    return {
+        "e2e": bool(row["e2e"]),
+        "envelope": row["envelope"],
+        "key": key["key"] if key else None,
+        "sender": sender["username"],
+        "to": f"g:{row['group_id']}" if row["group_id"] else f"u:{user['username']}",
+    }
+
+
 @app.get(API + "/snaps/{snap_id}/overlay")
 def snap_overlay(snap_id: str, user=Depends(current_user)):
     with db() as conn:
-        _delivery(conn, snap_id, user["id"])
+        row = _delivery(conn, snap_id, user["id"])
     if not overlay_path(snap_id).exists():
         raise HTTPException(404, "no overlay")
-    return FileResponse(overlay_path(snap_id), media_type="image/png", headers={"Cache-Control": "no-store"})
+    return FileResponse(overlay_path(snap_id), media_type="application/octet-stream" if row["e2e"] else "image/png", headers={"Cache-Control": "no-store"})
 
 
 @app.post(API + "/snaps/{snap_id}/open")

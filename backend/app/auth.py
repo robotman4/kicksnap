@@ -214,13 +214,24 @@ def _prune():
         _links.pop(code, None)
 
 
+class LinkStart(BaseModel):
+    link_key: str | None = None  # one-time X25519 key; the identity key comes back sealed to it (docs/e2e.md)
+
+
+class LinkApprove(BaseModel):
+    key_blob: str | None = None
+
+
 @router.post("/link/start", dependencies=[Depends(limit("link", 10, 60))])
-def link_start():
+def link_start(body: LinkStart | None = None):
     """New device asks to join. Shows the code as a QR for the other device to scan."""
     _prune()
+    link_key = body.link_key if body else None
+    if link_key and len(link_key) != 43:
+        raise HTTPException(400, "bad link key")
     code = "".join(secrets.choice(_ALPHABET) for _ in range(6))
     secret = secrets.token_urlsafe(24)
-    _links[code] = {"secret": secret, "created": now(), "user_id": None}
+    _links[code] = {"secret": secret, "created": now(), "user_id": None, "link_key": link_key, "key_blob": None}
     return {"code": code, "secret": secret, "expires_in": LINK_TTL}
 
 
@@ -236,17 +247,36 @@ def link_poll(code: str, secret: str, request: Request, response: Response):
     with db() as conn:
         new_device(conn, link["user_id"], request, response)
         user = conn.execute("SELECT * FROM users WHERE id = ?", (link["user_id"],)).fetchone()
-    return {"approved": True, "user": public(user), **issued(request)}
+    return {"approved": True, "user": public(user), "key_blob": link["key_blob"], **issued(request)}
+
+
+def _link_code(code: str) -> str:
+    return code.strip().upper().removeprefix("KIKS-LINK:").removeprefix("KICKSNAP-LINK:").split("#")[0]
+
+
+@router.get("/link/{code}/key")
+def link_key(code: str, ks_device: str | None = Depends(device_token)):
+    """For an approver who typed the code instead of scanning it: compare the check number first."""
+    current_user(ks_device)
+    _prune()
+    link = _links.get(_link_code(code))
+    if not link or link["user_id"]:
+        raise HTTPException(410, "that code expired, make a new one")
+    return {"link_key": link["link_key"]}
 
 
 @router.post("/link/{code}/approve", dependencies=[Depends(limit("approve", 10, 60))])
-def link_approve(code: str, ks_device: str | None = Depends(device_token)):
+def link_approve(code: str, body: LinkApprove | None = None, ks_device: str | None = Depends(device_token)):
     user = current_user(ks_device)
     _prune()
-    link = _links.get(code.strip().upper().removeprefix("KIKS-LINK:").removeprefix("KICKSNAP-LINK:"))
+    link = _links.get(_link_code(code))
     if not link or link["user_id"]:
         raise HTTPException(410, "that code expired, make a new one")
+    blob = body.key_blob if body else None
+    if blob and len(blob) > 256:
+        raise HTTPException(400, "bad key")
     link["user_id"] = user["id"]
+    link["key_blob"] = blob
     return {"ok": True}
 
 

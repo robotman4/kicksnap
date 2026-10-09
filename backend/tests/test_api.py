@@ -5,10 +5,11 @@ JPEG = b"\xff\xd8\xff\xe0" + b"0" * 64
 
 
 def send(sender, to, seconds=5):
+    """E2E-shaped upload without real crypto (test_e2e.py does the real thing); the server can't tell."""
     return sender.post(
         "/api/v1/snaps",
-        files={"file": ("snap.jpg", JPEG, "image/jpeg")},
-        data={"to": ",".join(u.name for u in to), "seconds": str(seconds)},
+        files={"file": ("snap", JPEG, "application/octet-stream")},
+        data={"to": ",".join(u.name for u in to), "seconds": str(seconds), "kind": "photo", "envelope": "x", "keys": "{}"},
     )
 
 
@@ -72,9 +73,16 @@ def test_snap_send_open_burn(friends):
 
 def test_text_message(friends):
     a, b = friends()
-    assert a.post(f"/api/v1/chats/u:{b.name}/messages", json={"body": "hej"}).status_code == 200
+    assert a.post(f"/api/v1/chats/u:{b.name}/messages", json={"body": "hej", "keys": {}}).status_code == 200
     msgs = b.get(f"/api/v1/chats/u:{a.name}/messages").json()["messages"]
     assert [m["body"] for m in msgs] == ["hej"]
+
+
+def test_clients_from_before_e2e_are_told_to_update(friends):
+    a, b = friends()
+    r = a.post("/api/v1/snaps", files={"file": ("snap.jpg", JPEG, "image/jpeg")}, data={"to": b.name})
+    assert r.status_code == 426
+    assert a.post(f"/api/v1/chats/u:{b.name}/messages", json={"body": "hej"}).status_code == 426
 
 
 def test_block_stops_snaps(friends):

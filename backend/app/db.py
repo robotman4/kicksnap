@@ -17,7 +17,12 @@ CREATE TABLE IF NOT EXISTS users (
     is_admin    INTEGER NOT NULL DEFAULT 0,       -- set from the server shell: python -m app.admin grant
     suspended_at    INTEGER,                      -- set = suspended
     suspended_until INTEGER,                      -- NULL with suspended_at set = until lifted
-    suspend_reason  TEXT                          -- shown to them on the suspended screen
+    suspend_reason  TEXT,                         -- shown to them on the suspended screen
+    -- end-to-end encryption (docs/e2e.md): Ed25519 identity key and the device list it signed
+    identity_key        TEXT,
+    device_list         TEXT,
+    device_list_sig     TEXT,
+    device_list_version INTEGER NOT NULL DEFAULT 0
 );
 -- every browser/phone is a device; its secret lives in an httpOnly cookie
 CREATE TABLE IF NOT EXISTS devices (
@@ -26,7 +31,8 @@ CREATE TABLE IF NOT EXISTS devices (
     token_hash  TEXT NOT NULL UNIQUE,
     label       TEXT NOT NULL DEFAULT '',
     created_at  INTEGER NOT NULL,
-    seen_at     INTEGER NOT NULL
+    seen_at     INTEGER NOT NULL,
+    enc_key     TEXT                       -- X25519 public key; the private half never leaves the device
 );
 CREATE TABLE IF NOT EXISTS passkeys (
     id          TEXT PRIMARY KEY,           -- base64url credential id
@@ -59,7 +65,16 @@ CREATE TABLE IF NOT EXISTS snaps (
     seconds     INTEGER NOT NULL,       -- view time, 0 = loop until closed
     has_overlay INTEGER NOT NULL DEFAULT 0, -- drawing/text layer on top of a video
     created_at  INTEGER NOT NULL,
-    group_id    INTEGER REFERENCES groups(id) ON DELETE CASCADE  -- NULL = sent to people directly
+    group_id    INTEGER REFERENCES groups(id) ON DELETE CASCADE,  -- NULL = sent to people directly
+    e2e         INTEGER NOT NULL DEFAULT 0, -- 1 = file is ciphertext, envelope set (docs/e2e.md)
+    envelope    TEXT
+);
+-- the snap's content key, wrapped for each device that may open it
+CREATE TABLE IF NOT EXISTS snap_keys (
+    snap_id     TEXT NOT NULL REFERENCES snaps(id) ON DELETE CASCADE,
+    device_id   INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    key         TEXT NOT NULL,
+    PRIMARY KEY (snap_id, device_id)
 );
 CREATE TABLE IF NOT EXISTS deliveries (
     snap_id     TEXT NOT NULL REFERENCES snaps(id) ON DELETE CASCADE,
@@ -91,8 +106,15 @@ CREATE TABLE IF NOT EXISTS messages (
     sender_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     to_user     INTEGER REFERENCES users(id) ON DELETE CASCADE,
     group_id    INTEGER REFERENCES groups(id) ON DELETE CASCADE,
-    body        TEXT NOT NULL,
-    created_at  INTEGER NOT NULL
+    body        TEXT NOT NULL,              -- the encrypted envelope when e2e = 1
+    created_at  INTEGER NOT NULL,
+    e2e         INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS message_keys (
+    message_id  INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    device_id   INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    key         TEXT NOT NULL,
+    PRIMARY KEY (message_id, device_id)
 );
 CREATE INDEX IF NOT EXISTS messages_direct ON messages(sender_id, to_user, created_at);
 CREATE INDEX IF NOT EXISTS messages_group ON messages(group_id, created_at);
@@ -127,6 +149,7 @@ CREATE TABLE IF NOT EXISTS reports (
     media         TEXT,            -- file in MEDIA_DIR/reports, only if the reporter attached the snap
     media_mime    TEXT,
     was_friend    INTEGER NOT NULL DEFAULT 0,
+    media_verified INTEGER,         -- E2E snaps: 1 = the sender's signature checks out, 0 = it doesn't
     created_at    INTEGER NOT NULL,
     closed_at     INTEGER,
     closed_by     TEXT,
@@ -155,7 +178,8 @@ CREATE TABLE IF NOT EXISTS report_items (
     place      TEXT,               -- "direct" or the group's name
     file       TEXT,               -- image in MEDIA_DIR/reports
     mime       TEXT,
-    at         INTEGER NOT NULL    -- when the text was sent / the image was added
+    at         INTEGER NOT NULL,   -- when the text was sent / the image was added
+    verified   INTEGER             -- E2E texts: 1 = signed by the sender, 0 = not
 );
 CREATE INDEX IF NOT EXISTS report_items_report ON report_items(report_id);
 -- names nobody can register; expires_at set = a cooldown after someone deleted their account
@@ -217,7 +241,21 @@ def _m2_reserve_kiks(conn) -> None:
         )
 
 
-MIGRATIONS = [_m1_groups_and_admin, _m2_reserve_kiks]
+def _m3_e2e(conn) -> None:
+    """End-to-end encryption: keys on users and devices, flags on snaps/messages/reports."""
+    for table, col, ddl in [
+        ("users", "identity_key", "TEXT"), ("users", "device_list", "TEXT"), ("users", "device_list_sig", "TEXT"),
+        ("users", "device_list_version", "INTEGER NOT NULL DEFAULT 0"), ("devices", "enc_key", "TEXT"),
+        ("snaps", "e2e", "INTEGER NOT NULL DEFAULT 0"), ("snaps", "envelope", "TEXT"),
+        ("messages", "e2e", "INTEGER NOT NULL DEFAULT 0"), ("reports", "media_verified", "INTEGER"),
+        ("report_items", "verified", "INTEGER"),
+    ]:
+        cols = _columns(conn, table)
+        if cols and col not in cols:  # a missing table gets the column from SCHEMA
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+
+
+MIGRATIONS = [_m1_groups_and_admin, _m2_reserve_kiks, _m3_e2e]
 RESERVED = ("admin", "root", "support", "kiks", "kicksnap", "moderator", "mod", "help", "system")
 
 

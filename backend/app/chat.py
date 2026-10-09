@@ -104,7 +104,7 @@ def resolve(conn, me: int, key: str):
 
 # --- chat list --------------------------------------------------------------
 
-SNAP_COLS = "s.id, s.kind, s.seconds, s.has_overlay, s.created_at, u.username AS sender"
+SNAP_COLS = "s.id, s.kind, s.seconds, s.has_overlay, s.created_at, s.e2e, u.username AS sender"
 
 
 def _row(state, at, kind, snaps, unread):
@@ -238,6 +238,9 @@ def chats(user=Depends(current_user)):
 
 # --- messages ---------------------------------------------------------------
 
+MSG_COLS = "m.id, m.body, m.created_at, m.e2e, k.key, u.username, u.color"
+
+
 @router.get("/chats/{key}/messages")
 def messages(key: str, user=Depends(current_user)):
     me = user["id"]
@@ -245,22 +248,25 @@ def messages(key: str, user=Depends(current_user)):
         kind, target = resolve(conn, me, key)
         if kind == "u":
             rows = conn.execute(
-                """SELECT m.id, m.body, m.created_at, u.username, u.color FROM messages m JOIN users u ON u.id = m.sender_id
+                f"""SELECT {MSG_COLS} FROM messages m JOIN users u ON u.id = m.sender_id
+                   LEFT JOIN message_keys k ON k.message_id = m.id AND k.device_id = :dev
                    WHERE (m.sender_id = :me AND m.to_user = :f) OR (m.sender_id = :f AND m.to_user = :me)
                    ORDER BY m.id DESC LIMIT 100""",
-                {"me": me, "f": target["id"]},
+                {"me": me, "f": target["id"], "dev": user["device_id"]},
             ).fetchall()
             seen = read_at(conn, target["id"], f"u:{me}")
         else:
             rows = conn.execute(
-                f"""SELECT m.id, m.body, m.created_at, u.username, u.color FROM messages m JOIN users u ON u.id = m.sender_id
+                f"""SELECT {MSG_COLS} FROM messages m JOIN users u ON u.id = m.sender_id
+                   LEFT JOIN message_keys k ON k.message_id = m.id AND k.device_id = :dev
                    WHERE m.group_id = :g AND {NOT_BLOCKED.format(col="m.sender_id")} ORDER BY m.id DESC LIMIT 100""",
-                {"g": target["id"], "me": me},
+                {"g": target["id"], "me": me, "dev": user["device_id"]},
             ).fetchall()
             seen = 0
     return {
         "messages": [
-            {"id": r["id"], "body": r["body"], "at": r["created_at"], "from": r["username"], "color": r["color"], "mine": r["username"] == user["username"]}
+            {"id": r["id"], "body": r["body"], "at": r["created_at"], "from": r["username"], "color": r["color"],
+             "mine": r["username"] == user["username"], "e2e": bool(r["e2e"]), "key": r["key"]}
             for r in reversed(rows)
         ],
         "seen_at": seen,  # 1:1 only: when they last read this chat
@@ -283,27 +289,41 @@ async def mark_read(key: str, user=Depends(current_user)):
 
 
 class NewMessage(BaseModel):
-    body: str
+    body: str  # the encrypted envelope (docs/e2e.md)
+    keys: dict[str, str] | None = None  # device id -> wrapped content key
 
 
 @router.post("/chats/{key}/messages", dependencies=[Depends(limit("text", 60, 60))])
 async def send_message(key: str, msg: NewMessage, user=Depends(current_user)):
+    """The 160-character limit is the client's job now: the server only sees ciphertext."""
     body = msg.body.strip()
+    if msg.keys is None:
+        raise HTTPException(426, "update kicksnap to send chats (refresh the app)")
     if not body:
         raise HTTPException(400, "say something")
-    if graphemes(body) > MAX_CHARS or len(body) > MAX_CHARS * 12:
+    if len(body) > 4096:
         raise HTTPException(400, f"keep it under {MAX_CHARS}")
     me = user["id"]
     with db() as conn:
         kind, target = resolve(conn, me, key)
         if kind == "u":
-            conn.execute("INSERT INTO messages (sender_id, to_user, body, created_at) VALUES (?, ?, ?, ?)", (me, target["id"], body, now()))
+            mid = conn.execute(
+                "INSERT INTO messages (sender_id, to_user, body, created_at, e2e) VALUES (?, ?, ?, ?, 1)", (me, target["id"], body, now())
+            ).lastrowid
             recipients = [(target["id"], f"u:{user['username']}")]
             title = "Kiks"
         else:
-            conn.execute("INSERT INTO messages (sender_id, group_id, body, created_at) VALUES (?, ?, ?, ?)", (me, target["id"], body, now()))
+            mid = conn.execute(
+                "INSERT INTO messages (sender_id, group_id, body, created_at, e2e) VALUES (?, ?, ?, ?, 1)", (me, target["id"], body, now())
+            ).lastrowid
             recipients = [(m, key) for m in member_ids(conn, target["id"]) if m != me and not blocked(conn, me, m)]
             title = target["name"]
+        from .keys import wraps_for
+
+        conn.executemany(
+            "INSERT OR REPLACE INTO message_keys (message_id, device_id, key) VALUES (?, ?, ?)",
+            [(mid, d, w) for d, w in wraps_for(conn, msg.keys, {me} | {uid for uid, _ in recipients})],
+        )
         # sending is reading: your own chat shouldn't show as unread
         chat = f"{kind}:{target['id']}"
         conn.execute(
@@ -372,7 +392,7 @@ async def _tell(conn_members: list[int], event: dict):
 
 def _details(conn, g, me: int) -> dict:
     members = conn.execute(
-        """SELECT u.username, u.color, m.user_id FROM group_members m JOIN users u ON u.id = m.user_id
+        """SELECT u.username, u.color, u.identity_key, m.user_id FROM group_members m JOIN users u ON u.id = m.user_id
            WHERE m.group_id = ? ORDER BY m.joined_at""",
         (g["id"],),
     ).fetchall()
@@ -386,7 +406,10 @@ def _details(conn, g, me: int) -> dict:
         "can_invite": _can_invite(g, me),
         # the join code only works in open mode, so only show it then
         "code": g["code"] if g["invite_mode"] == "open" else None,
-        "members": [{"username": m["username"], "color": m["color"], "admin": m["user_id"] == g["admin_id"]} for m in members],
+        "members": [
+            {"username": m["username"], "color": m["color"], "admin": m["user_id"] == g["admin_id"], "key": m["identity_key"]}
+            for m in members
+        ],
     }
 
 
