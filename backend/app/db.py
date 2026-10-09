@@ -132,6 +132,18 @@ CREATE TABLE IF NOT EXISTS reports (
     outcome       TEXT              -- dismissed | suspended | deleted
 );
 CREATE INDEX IF NOT EXISTS reports_open ON reports(closed_at, reported_id);
+-- proof attached to a report: copies of texts (they'd burn after 24h) and screenshots
+CREATE TABLE IF NOT EXISTS report_items (
+    id         INTEGER PRIMARY KEY,
+    report_id  INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL,      -- text | image
+    body       TEXT,               -- the text, copied when reported
+    place      TEXT,               -- "direct" or the group's name
+    file       TEXT,               -- image in MEDIA_DIR/reports
+    mime       TEXT,
+    at         INTEGER NOT NULL    -- when the text was sent / the image was added
+);
+CREATE INDEX IF NOT EXISTS report_items_report ON report_items(report_id);
 -- names nobody can register; expires_at set = a cooldown after someone deleted their account
 CREATE TABLE IF NOT EXISTS reserved_usernames (
     name        TEXT PRIMARY KEY COLLATE NOCASE,

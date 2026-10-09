@@ -81,7 +81,8 @@ function Actions({ name, suspended, onDone, toast, onDismiss }: { name: string; 
 
 function Reports({ tick, toast }: { tick: number; toast: (t: string) => void }) {
   const [list, setList] = useState<AdminReport[] | null>(null);
-  const [media, setMedia] = useState<Record<number, string>>({});
+  // evidence url -> blob url
+  const [media, setMedia] = useState<Record<string, string>>({});
   const load = () => api.admin.reports().then(setList, (e) => toast(e.message));
   useEffect(() => {
     load();
@@ -91,14 +92,16 @@ function Reports({ tick, toast }: { tick: number; toast: (t: string) => void }) 
   useEffect(() => {
     const urls: string[] = [];
     list?.forEach((r) => {
-      if (r.media && !media[r.id])
-        fetch(r.media, { credentials: "same-origin" })
-          .then((res) => res.blob())
-          .then((b) => {
-            const u = URL.createObjectURL(b);
-            urls.push(u);
-            setMedia((m) => ({ ...m, [r.id]: u }));
-          });
+      [r.media, ...r.shots].forEach((src) => {
+        if (src && !media[src])
+          fetch(src, { credentials: "same-origin" })
+            .then((res) => res.blob())
+            .then((b) => {
+              const u = URL.createObjectURL(b);
+              urls.push(u);
+              setMedia((m) => ({ ...m, [src]: u }));
+            });
+      });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list]);
@@ -122,12 +125,37 @@ function Reports({ tick, toast }: { tick: number; toast: (t: string) => void }) 
             {r.was_friend ? " (a friend of theirs)" : ""} · {r.friend_reporters} friend{r.friend_reporters === 1 ? "" : "s"} reported them
           </p>
           {r.note && <p className="mt-2 rounded-2xl bg-black/40 px-4 py-2 text-white/80">“{r.note}”</p>}
-          {r.media && media[r.id] && (
+          {r.media && media[r.media] && (
             <div className="mt-3 overflow-hidden rounded-2xl bg-black">
               {r.media_kind === "video" ? (
-                <video src={media[r.id]} controls playsInline className="max-h-80 w-full object-contain" />
+                <video src={media[r.media]} controls playsInline className="max-h-80 w-full object-contain" />
               ) : (
-                <img src={media[r.id]} alt="reported snap" className="max-h-80 w-full object-contain" />
+                <img src={media[r.media]} alt="reported snap" className="max-h-80 w-full object-contain" />
+              )}
+            </div>
+          )}
+          {r.texts.length > 0 && (
+            <div className="mt-3 flex flex-col gap-1.5">
+              {r.texts.map((t, i) => (
+                <div key={i} className="flex flex-col items-start">
+                  <p className="max-w-[90%] whitespace-pre-wrap break-words rounded-3xl bg-white/10 px-4 py-2 font-semibold">{t.body}</p>
+                  <span className="ml-3 mt-0.5 text-xs text-white/40">
+                    {t.group ? `in ${t.group}` : "to them directly"} · {ago(t.at)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {r.shots.length > 0 && (
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {r.shots.map((src) =>
+                media[src] ? (
+                  <a key={src} href={media[src]} target="_blank" rel="noreferrer" className="overflow-hidden rounded-xl bg-black">
+                    <img src={media[src]} alt="screenshot" className="aspect-[9/16] w-full object-cover" />
+                  </a>
+                ) : (
+                  <div key={src} className="aspect-[9/16] rounded-xl bg-white/5" />
+                )
               )}
             </div>
           )}

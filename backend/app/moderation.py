@@ -27,6 +27,9 @@ router = APIRouter(prefix=API)
 REASONS = {"spam", "nudity", "harassment", "violence", "other"}
 REPORT_DIR = MEDIA_DIR / "reports"
 MAX_REPORT_MB = 50
+MAX_TEXTS = 10
+MAX_SHOTS = 3
+MAX_SHOT_MB = 10
 
 
 def report_file(name: str) -> Path:
@@ -34,9 +37,35 @@ def report_file(name: str) -> Path:
 
 
 def drop_media(conn, where: str, args: tuple):
+    """Deletes attached snaps and screenshots from disk. Copied texts stay with the closed report."""
     for r in conn.execute(f"SELECT media FROM reports WHERE media IS NOT NULL AND {where}", args).fetchall():
         report_file(r[0]).unlink(missing_ok=True)
     conn.execute(f"UPDATE reports SET media = NULL, media_mime = NULL WHERE {where}", args)
+    ids = f"SELECT id FROM reports WHERE {where}"
+    for r in conn.execute(f"SELECT file FROM report_items WHERE file IS NOT NULL AND report_id IN ({ids})", args).fetchall():
+        report_file(r[0]).unlink(missing_ok=True)
+    conn.execute(f"DELETE FROM report_items WHERE kind = 'image' AND report_id IN ({ids})", args)
+
+
+def their_texts(conn, me: int, them: int, ids: list[int] | None = None, limit: int = 30):
+    """Texts `them` sent that `me` could see: to me directly, or in a group I'm in."""
+    pick = f"AND m.id IN ({','.join('?' * len(ids))})" if ids else ""
+    return conn.execute(
+        f"""SELECT m.id, m.body, m.created_at, g.name AS group_name
+            FROM messages m LEFT JOIN groups g ON g.id = m.group_id
+            WHERE m.sender_id = ?
+              AND (m.to_user = ? OR m.group_id IN (SELECT group_id FROM group_members WHERE user_id = ?))
+              {pick}
+            ORDER BY m.created_at DESC, m.id DESC LIMIT ?""",
+        (them, me, me, *(ids or []), limit),
+    ).fetchall()
+
+
+def _named(conn, username: str, me: int):
+    other = conn.execute("SELECT id, username FROM users WHERE username = ?", (username.strip().lower().lstrip("@"),)).fetchone()
+    if not other or other["id"] == me:
+        raise HTTPException(404, "no one by that name")
+    return other
 
 
 def log(conn, admin: str, action: str, target: str, detail: str = ""):
@@ -48,6 +77,15 @@ def log(conn, admin: str, action: str, target: str, detail: str = ""):
 
 # --- reporting (everyone) -----------------------------------------------------
 
+@router.get("/reports/texts/{username}")
+def report_texts(username: str, user=Depends(current_user)):
+    """Their recent texts you can pick as proof (texts burn after 24h, so this is what's left)."""
+    with db() as conn:
+        other = _named(conn, username, user["id"])
+        rows = their_texts(conn, user["id"], other["id"])
+    return [{"id": r["id"], "body": r["body"], "at": r["created_at"], "group": r["group_name"]} for r in rows]
+
+
 @router.post("/reports", dependencies=[Depends(limit("report", 10, 3600))])
 async def report(
     username: str = Form(...),
@@ -55,17 +93,28 @@ async def report(
     note: str = Form(""),
     block: bool = Form(True),
     file: UploadFile | None = File(None),
+    message_ids: list[int] = Form([]),
+    shots: list[UploadFile] = File([]),
     user=Depends(current_user),
 ):
-    """Report someone, optionally with the snap you were looking at. Blocks them too by default."""
+    """Report someone. Proof is optional: the snap you were looking at, texts of theirs you could
+    see (copied now, since texts burn), and up to 3 screenshots. Blocks them too by default."""
     me = user["id"]
     if reason not in REASONS:
         raise HTTPException(400, "pick a reason")
     note = note.strip()[:500]
+    shots = [f for f in shots if f and f.filename]
+    if len(message_ids) > MAX_TEXTS:
+        raise HTTPException(400, f"pick up to {MAX_TEXTS} texts")
+    if len(shots) > MAX_SHOTS:
+        raise HTTPException(400, f"up to {MAX_SHOTS} screenshots")
+    if any(not (f.content_type or "").startswith("image/") for f in shots):
+        raise HTTPException(400, "screenshots must be images")
     with db() as conn:
-        other = conn.execute("SELECT id, username FROM users WHERE username = ?", (username.strip().lower().lstrip("@"),)).fetchone()
-        if not other or other["id"] == me:
-            raise HTTPException(404, "no one by that name")
+        other = _named(conn, username, me)
+        texts = their_texts(conn, me, other["id"], list(dict.fromkeys(message_ids)), MAX_TEXTS) if message_ids else []
+        if len(texts) != len(set(message_ids)):
+            raise HTTPException(400, "some of those texts are gone, pick again")
         was_friend = are_friends(conn, me, other["id"])
         queue_was_empty = not conn.execute("SELECT 1 FROM reports WHERE closed_at IS NULL").fetchone()
 
@@ -77,13 +126,34 @@ async def report(
         REPORT_DIR.mkdir(parents=True, exist_ok=True)
         media = secrets.token_urlsafe(16)
         await save_upload(file, report_file(media), MAX_REPORT_MB * 1024 * 1024)
+    saved = []
+    try:
+        for f in shots:
+            REPORT_DIR.mkdir(parents=True, exist_ok=True)
+            name = secrets.token_urlsafe(16)
+            await save_upload(f, report_file(name), MAX_SHOT_MB * 1024 * 1024)
+            saved.append((name, f.content_type))
+    except HTTPException:
+        for name in [n for n, _ in saved] + ([media] if media else []):
+            report_file(name).unlink(missing_ok=True)
+        raise
 
     with db() as conn:
-        conn.execute(
+        rid = conn.execute(
             """INSERT INTO reports (reporter_id, reporter_name, reported_id, reported_name, reason, note, media, media_mime, was_friend, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (me, user["username"], other["id"], other["username"], reason, note, media, mime, int(was_friend), now()),
-        )
+        ).lastrowid
+        for t in sorted(texts, key=lambda t: (t["created_at"], t["id"])):
+            conn.execute(
+                "INSERT INTO report_items (report_id, kind, body, place, at) VALUES (?, 'text', ?, ?, ?)",
+                (rid, t["body"], t["group_name"] or "direct", t["created_at"]),
+            )
+        for name, shot_mime in saved:
+            conn.execute(
+                "INSERT INTO report_items (report_id, kind, file, mime, at) VALUES (?, 'image', ?, ?, ?)",
+                (rid, name, shot_mime, now()),
+            )
         admins = [r[0] for r in conn.execute("SELECT id FROM users WHERE is_admin = 1")]
     if block:
         from .safety import Who, block as do_block
@@ -132,6 +202,11 @@ def open_reports(admin=Depends(admin_user)):
                FROM reports r LEFT JOIN users u ON u.id = r.reported_id
                WHERE r.closed_at IS NULL""",
         ).fetchall()
+        items: dict[int, list] = {}
+        for i in conn.execute(
+            "SELECT * FROM report_items WHERE report_id IN (SELECT id FROM reports WHERE closed_at IS NULL) ORDER BY at, id"
+        ):
+            items.setdefault(i["report_id"], []).append(i)
     out = [
         {
             "id": r["id"],
@@ -143,6 +218,9 @@ def open_reports(admin=Depends(admin_user)):
             "note": r["note"],
             "media": f"{API}/admin/reports/{r['id']}/media" if r["media"] else None,
             "media_kind": ("video" if (r["media_mime"] or "").startswith("video/") else "photo") if r["media"] else None,
+            "texts": [{"body": i["body"], "at": i["at"], "group": None if i["place"] == "direct" else i["place"]}
+                      for i in items.get(r["id"], []) if i["kind"] == "text"],
+            "shots": [f"{API}/admin/reports/{r['id']}/shots/{i['id']}" for i in items.get(r["id"], []) if i["kind"] == "image"],
             "was_friend": bool(r["was_friend"]),
             "friend_reporters": r["friend_reporters"],
             "at": r["created_at"],
@@ -161,6 +239,15 @@ def report_media(report_id: int, admin=Depends(admin_user)):
     if not r or not r["media"] or not report_file(r["media"]).exists():
         raise HTTPException(404, "gone")
     return FileResponse(report_file(r["media"]), media_type=r["media_mime"], headers={"Cache-Control": "no-store"})
+
+
+@router.get("/admin/reports/{report_id}/shots/{item_id}")
+def report_shot(report_id: int, item_id: int, admin=Depends(admin_user)):
+    with db() as conn:
+        i = conn.execute("SELECT file, mime FROM report_items WHERE id = ? AND report_id = ?", (item_id, report_id)).fetchone()
+    if not i or not i["file"] or not report_file(i["file"]).exists():
+        raise HTTPException(404, "gone")
+    return FileResponse(report_file(i["file"]), media_type=i["mime"], headers={"Cache-Control": "no-store"})
 
 
 @router.post("/admin/reports/{report_id}/dismiss")
