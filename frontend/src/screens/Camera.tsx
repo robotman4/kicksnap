@@ -1,7 +1,7 @@
 import { Images, MessageCircle, RefreshCcw, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
-import { Friend } from "../lib/api";
+import { Friend, limits } from "../lib/api";
 import { buzz, containRect, pref } from "../lib/feel";
 import { cropRect, VIEW_ASPECT } from "../lib/looks";
 
@@ -11,7 +11,6 @@ export type Capture = { blob: Blob; kind: "photo" | "video"; url: string };
 // field of view. Browsers pick the closest mode the camera really has.
 // resizeMode "none" asks for a native mode rather than a cropped/scaled one.
 const STREAM = { width: { ideal: 3264 }, height: { ideal: 2448 }, aspectRatio: { ideal: 4 / 3 }, resizeMode: { ideal: "none" } } as MediaTrackConstraints;
-const VIDEO_BPS = 6_000_000; // keeps a 10s clip around 7-8 MB
 
 // Focus/zoom constraints aren't in the DOM typings yet.
 type CamCaps = MediaTrackCapabilities & { focusMode?: string[]; pointsOfInterest?: unknown; zoom?: { min: number; max: number } };
@@ -72,7 +71,6 @@ function useWindowSize() {
 // Every iPhone browser is WebKit; Chrome on iOS says CriOS, not Chrome/.
 const IS_WEBKIT = /AppleWebKit/.test(navigator.userAgent) && !/Chrome\/|Android/.test(navigator.userAgent);
 
-const MAX_VIDEO_MS = 10_000;
 const HOLD_MS = 220;
 
 function pickMime() {
@@ -274,7 +272,7 @@ export function Camera({
     if (!holding.current || !stream.current) return mic?.getTracks().forEach((t) => t.stop());
     mic?.getAudioTracks().forEach((t) => tracks.push(t));
     const mime = pickMime();
-    const rec = new MediaRecorder(new MediaStream(tracks), { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: VIDEO_BPS });
+    const rec = new MediaRecorder(new MediaStream(tracks), { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: limits.video_kbps * 1000 });
     const chunks: Blob[] = [];
     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     rec.onstop = () => {
@@ -291,7 +289,8 @@ export function Camera({
     recorder.current = rec;
     setRecording(true);
     buzz(15);
-    stopTimer.current = window.setTimeout(endRecording, MAX_VIDEO_MS);
+    // the server sets how long (and how big: bitrate x length), see limits in lib/api
+    stopTimer.current = window.setTimeout(endRecording, limits.video_seconds * 1000);
   };
 
   const endRecording = () => {
@@ -450,7 +449,7 @@ export function Camera({
                 strokeLinecap="round"
                 className="stroke-accent"
                 strokeDasharray="251.3"
-                style={{ animation: `ring ${MAX_VIDEO_MS}ms linear forwards` }}
+                style={{ animation: `ring ${limits.video_seconds}s linear forwards` }}
               />
             )}
           </svg>

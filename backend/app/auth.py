@@ -24,6 +24,7 @@ from webauthn.helpers.structs import (
 
 from .api import API, COOKIE, device_token, own_origin, poll_secret, wants_token
 from .limits import limit
+from .media import limits as upload_limits
 from .db import db
 from .hub import hub
 
@@ -166,7 +167,7 @@ def name_free(name: str):
 def me(ks_device: str | None = Depends(device_token)):
     """Returns the user even before a name is picked, so the client knows where to go."""
     user = any_user(ks_device)
-    out = {**public(user), "admin": bool(user["is_admin"])}
+    out = {**public(user), "admin": bool(user["is_admin"]), "limits": upload_limits()}
     if user["username"] and suspended(user):
         out["suspended_until"] = user["suspended_until"] or 0  # 0 = until an admin lifts it
     return out

@@ -24,14 +24,13 @@ from .limits import limit
 from .db import db
 from .chat import are_friends, blocked, member_ids, router as chat_router
 from .hub import hub
-from .media import FILE_HEADERS, burn, media_path, overlay_path, save_upload
+from .media import FILE_HEADERS, MAX_UPLOAD_MB, MB, burn, check_daily, limits, media_path, overlay_path, record_upload, save_upload
 from .push import notify, router as push_router
 from .keys import router as keys_router, wraps_for
 from .moderation import router as moderation_router
 from .safety import router as safety_router
 
 SNAP_TTL_HOURS = int(os.getenv("SNAP_TTL_HOURS", "24"))
-MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 STATIC_DIR = Path(os.getenv("STATIC_DIR", "../frontend/dist"))
 VIEW_SECONDS = {0, 3, 5, 10}
 
@@ -240,10 +239,10 @@ async def send_snap(
         raise HTTPException(400, "bad keys")
 
     snap_id = secrets.token_urlsafe(16)
-    await save_upload(file, media_path(snap_id), MAX_UPLOAD_MB * 1024 * 1024)
+    size = await save_upload(file, media_path(snap_id), MAX_UPLOAD_MB * MB)
     has_overlay = bool(overlay and overlay.filename)
     if has_overlay:
-        await save_upload(overlay, overlay_path(snap_id), 5 * 1024 * 1024)
+        size += await save_upload(overlay, overlay_path(snap_id), 5 * MB)
 
     me = user["id"]
     # one snap row per conversation: direct friends share one, each group gets its own
@@ -266,6 +265,12 @@ async def send_snap(
         if not targets:
             burn(snap_id)
             raise HTTPException(400, "you can only snap friends")
+        try:
+            check_daily(conn, me, size * len(targets))
+        except HTTPException:
+            burn(snap_id)
+            raise
+        record_upload(conn, me, size * len(targets))
         for n, (gid, recipients, _) in enumerate(targets):
             sid = snap_id if n == 0 else secrets.token_urlsafe(16)
             if n:
@@ -368,6 +373,7 @@ def burn_expired() -> int:
             burn(snap_id)
         conn.execute("DELETE FROM snaps WHERE created_at < ?", (cutoff,))
         conn.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
+        conn.execute("DELETE FROM uploads WHERE at < ?", (now() - 86400,))
         conn.execute("DELETE FROM reserved_usernames WHERE expires_at IS NOT NULL AND expires_at < ?", (now(),))
         # accounts that never picked a name
         conn.execute("DELETE FROM users WHERE username IS NULL AND created_at < ?", (now() - 86400,))
@@ -393,7 +399,7 @@ async def startup():
 @app.get(API + "/health")
 def health():
     """For Docker's HEALTHCHECK and uptime monitors: 503 if the database can't be read."""
-    out = {"ok": True, "api": API, "version": __version__, "db": "ok", **errors.summary()}
+    out = {"ok": True, "api": API, "version": __version__, "db": "ok", "limits": limits(), **errors.summary()}
     try:
         with db() as conn:
             conn.execute("SELECT COUNT(*) FROM users").fetchone()

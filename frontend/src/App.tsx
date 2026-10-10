@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pager } from "./components/Pager";
 import { Toast } from "./components/Toast";
-import { api, ApiError, Chat, FriendLists, live, Suspension, User } from "./lib/api";
+import { api, ApiError, Chat, FriendLists, live, Suspension, uploadProblem, User } from "./lib/api";
 import { Bell } from "lucide-react";
 import { applyAccent, buzz, pref } from "./lib/feel";
 import { enablePush, pushState, syncPush } from "./lib/push";
@@ -196,7 +196,9 @@ function Home({ me, setMe }: { me: User & { username: string }; setMe: (u: User 
           me={me}
           active={page === CAMERA && !capture && !viewing && !talking}
           unread={unread}
-          onCapture={setCapture}
+          onCapture={(c) =>
+            uploadProblem(c.blob, c.kind).then((p) => (p ? (setToast(p), URL.revokeObjectURL(c.url)) : setCapture(c)))
+          }
           onChats={() => setPage(CHATS)}
           onFriends={() => setPage(FRIENDS)}
           onSettings={() => setSettings(true)}

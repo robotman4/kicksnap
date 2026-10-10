@@ -190,6 +190,12 @@ CREATE TABLE IF NOT EXISTS reserved_usernames (
     created_by  TEXT NOT NULL,
     expires_at  INTEGER
 );
+CREATE TABLE IF NOT EXISTS uploads (
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    bytes       INTEGER NOT NULL,
+    at          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS uploads_user ON uploads(user_id, at);
 CREATE TABLE IF NOT EXISTS admin_log (
     id          INTEGER PRIMARY KEY,
     admin       TEXT NOT NULL,

@@ -235,3 +235,35 @@ def test_other_sites_cant_open_a_cookie_socket(new_user):
             pass
     finally:
         u.c.cookies.clear()
+
+
+def test_limits_are_published(client, new_user):
+    want = {"upload_mb", "video_seconds", "video_kbps", "daily_mb"}
+    assert set(client.get("/api/v1/health").json()["limits"]) == want
+    assert set(new_user().get("/api/v1/me").json()["limits"]) == want
+
+
+def test_too_big_snap_is_refused(friends, monkeypatch):
+    import app.main as main
+    a, b = friends()
+    monkeypatch.setattr(main, "MAX_UPLOAD_MB", 1)
+    r = a.post(
+        "/api/v1/snaps",
+        files={"file": ("snap", b"0" * (1024 * 1024 + 1), "application/octet-stream")},
+        data={"to": b.name, "kind": "video", "envelope": "x", "keys": "{}"},
+    )
+    assert r.status_code == 413
+    assert "1 MB" in r.json()["detail"]
+
+
+def test_daily_upload_cap(friends, monkeypatch):
+    import app.media as media
+    a, b = friends()
+    monkeypatch.setattr(media, "DAILY_UPLOAD_MB", 1)
+    big = b"0" * (600 * 1024)
+    form = {"to": b.name, "kind": "photo", "envelope": "x", "keys": "{}"}
+    assert a.post("/api/v1/snaps", files={"file": ("snap", big, "application/octet-stream")}, data=form).status_code == 200
+    r = a.post("/api/v1/snaps", files={"file": ("snap", big, "application/octet-stream")}, data=form)
+    assert r.status_code == 429
+    assert "1 MB" in r.json()["detail"]
+    assert send(b, [a]).status_code == 200  # someone else's budget is their own

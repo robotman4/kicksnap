@@ -1,4 +1,6 @@
-export type User = { username: string | null; color: string; admin?: boolean; suspended_until?: number };
+export type User = { username: string | null; color: string; admin?: boolean; suspended_until?: number; limits?: Limits };
+/** The server's upload limits (MAX_UPLOAD_MB etc., docs/deploy.md). */
+export type Limits = { upload_mb: number; video_seconds: number; video_kbps: number; daily_mb: number };
 /** key: the friend's identity key (E2E, docs/e2e.md), null until their app has made one */
 export type Friend = { username: string; color: string; key?: string | null };
 export type SnapMeta = { id: string; kind: "photo" | "video"; seconds: number; has_overlay: number; created_at: number; sender: string; e2e?: number };
@@ -94,8 +96,37 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 const json = (body: unknown) => JSON.stringify(body);
 const post = <T>(path: string, body?: unknown) => call<T>(path, { method: "POST", body: body === undefined ? undefined : json(body) });
 
+/** What this server allows; the defaults hold until /me says otherwise. */
+export const limits: Limits = { upload_mb: 50, video_seconds: 30, video_kbps: 6000, daily_mb: 500 };
+
+function videoSeconds(blob: Blob): Promise<number> {
+  return new Promise((ok) => {
+    const v = document.createElement("video");
+    const url = URL.createObjectURL(blob);
+    const done = (d: number) => (URL.revokeObjectURL(url), ok(d));
+    setTimeout(() => done(NaN), 3000); // never hold up the editor over this
+    v.preload = "metadata";
+    v.onloadedmetadata = () => done(v.duration);
+    v.onerror = () => done(NaN);
+    v.src = url;
+  });
+}
+
+/** Why the server would turn this down, or null. Says so before anything gets encrypted and sent. */
+export async function uploadProblem(blob: Blob, kind: "photo" | "video"): Promise<string | null> {
+  if (blob.size > limits.upload_mb * 1024 * 1024) return `too big: snaps can be up to ${limits.upload_mb} MB`;
+  // recorded webm says Infinity until played through; the recorder stops at the limit anyway
+  const secs = kind === "video" ? await videoSeconds(blob) : 0;
+  if (Number.isFinite(secs) && secs > limits.video_seconds + 1) return `too long: videos can be up to ${limits.video_seconds}s`;
+  return null;
+}
+
 export const api = {
-  me: () => call<User>("/api/v1/me"),
+  me: () =>
+    call<User>("/api/v1/me").then((u) => {
+      if (u.limits) Object.assign(limits, u.limits);
+      return u;
+    }),
   startFresh: () => post<User>("/api/v1/devices/new"),
   nameFree: (name: string) => call<{ free: boolean; valid: boolean }>(`/api/v1/names/${encodeURIComponent(name)}`),
   pickName: (username: string) => post<User>("/api/v1/me/name", { username }),

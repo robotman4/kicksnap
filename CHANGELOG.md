@@ -4,6 +4,10 @@ Versions follow [semver](https://semver.org). Release images: `ghcr.io/robotman4
 
 ## Unreleased
 
+- **Upload limits are server settings.** `MAX_VIDEO_SECONDS` (30), `VIDEO_KBPS` (6000) and `DAILY_UPLOAD_MB` (500
+  per user per day) join `MAX_UPLOAD_MB` (50). The apps get them from `/me`: the recorder stops at the limit, and a
+  gallery pick that's too big or too long says so before sending. The server refuses oversize files and anything
+  past the daily total with a clear message.
 - **Security fixes before beta.** Report screenshots and snaps can only be photo/video types, and every file the
   server hands out is `nosniff` and sandboxed, so a reported "image" can't run script when an admin opens it.
   Rate limits no longer reset when a request brings a made-up bearer token. A passkey can't overwrite another

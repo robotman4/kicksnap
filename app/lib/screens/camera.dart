@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:video_player/video_player.dart';
 
 import '../models.dart';
 import '../store.dart';
@@ -25,12 +27,13 @@ class Capture {
   final double? crop;
 }
 
-const _maxVideo = Duration(seconds: 10);
+/// how long a video can be: the server's call (Limits, from /me)
+Duration get _maxVideo => Duration(seconds: Limits.current.videoSeconds);
 const _hold = Duration(milliseconds: 220);
 
 /// The camera page: a rounded viewfinder (the sensor frame, cropped a little to viewAspect),
 /// tap to focus, double tap to flip, pinch to zoom, tap the shutter for a photo, hold it for
-/// up to 10 s of video.
+/// video, up to the server's limit (30 s by default).
 class Camera extends StatefulWidget {
   const Camera({super.key, required this.me, required this.active, required this.unread, required this.onCapture, required this.onChats, required this.onFriends, required this.onSettings});
   final User me;
@@ -103,7 +106,9 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
       final want = front ? CameraLensDirection.front : CameraLensDirection.back;
       final desc = cameras.firstWhere((c) => c.lensDirection == want, orElse: () => cameras.first);
       // max resolution: the whole sensor (4:3 on most phones), so nothing is cropped
-      final c = CameraController(desc, ResolutionPreset.max, enableAudio: true, imageFormatGroup: ImageFormatGroup.jpeg);
+      // video bitrate from the server: it sets the file size whatever the resolution
+      final c = CameraController(desc, ResolutionPreset.max,
+          enableAudio: true, imageFormatGroup: ImageFormatGroup.jpeg, videoBitrate: Limits.current.videoKbps * 1000);
       await c.initialize();
       if (mine != gen || !mounted) {
         await c.dispose();
@@ -172,6 +177,7 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     // let go while the recorder was starting: stop straight away
     if (!holding) return endRecording();
     setState(() => recording = true);
+    ring.duration = _maxVideo;
     ring.forward(from: 0);
     buzz(15);
     stopTimer = Timer(_maxVideo, endRecording);
@@ -214,6 +220,11 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     final f = await ImagePicker().pickMedia(requestFullMetadata: false);
     if (f == null) return;
     final video = (f.mimeType ?? '').startsWith('video') || RegExp(r'\.(mp4|mov|webm|3gp|mkv)$', caseSensitive: false).hasMatch(f.path);
+    final problem = await _uploadProblem(f.path, video);
+    if (problem != null) {
+      if (mounted) toast(context, problem);
+      return;
+    }
     widget.onCapture(Capture(f.path, video ? 'video' : 'photo', fromGallery: true));
   }
 
@@ -243,6 +254,23 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     await c.setZoomLevel(z).catchError((_) {});
     zoomBusy = false;
     if (wantZoom != null && mounted) pushZoom();
+  }
+
+  /// Why the server would turn this down, or null: said here, before it's encrypted and sent.
+  Future<String?> _uploadProblem(String path, bool video) async {
+    final l = Limits.current;
+    if (await File(path).length() > l.uploadMb * 1024 * 1024) return 'too big: snaps can be up to ${l.uploadMb} MB';
+    if (!video) return null;
+    final v = VideoPlayerController.file(File(path));
+    try {
+      await v.initialize().timeout(const Duration(seconds: 3));
+      if (v.value.duration > Duration(seconds: l.videoSeconds + 1)) return 'too long: videos can be up to ${l.videoSeconds}s';
+    } catch (_) {
+      // can't tell: let it through, the size cap still holds
+    } finally {
+      v.dispose();
+    }
+    return null;
   }
 
   void tap(TapUpDetails d, Size box) {

@@ -90,11 +90,18 @@ themselves, with tracebacks, are in `docker compose logs kiks`.
 |---|---|---|
 | `PORT` | `8080` | host port |
 | `SNAP_TTL_HOURS` | `24` | unopened snaps burn after this |
-| `MAX_UPLOAD_MB` | `50` | largest snap upload |
+| `MAX_UPLOAD_MB` | `50` | largest snap file (enforced by the server) |
+| `MAX_VIDEO_SECONDS` | `30` | the recorder stops here and longer gallery videos are refused (enforced by the apps) |
+| `VIDEO_KBPS` | `6000` | recording bitrate, so 30 s is about 23 MB at any resolution (enforced by the apps) |
+| `DAILY_UPLOAD_MB` | `500` | per user, rolling 24 h, every copy counted; `0` = no cap (enforced by the server) |
 | `RP_ID` | request host | passkey domain; set it if you serve on several hostnames |
 | `VAPID_SUBJECT` | project URL | `mailto:` or `https:` contact for push services |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | proxy address(es) to trust, see above |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+Snaps are end-to-end encrypted, so the server only sees bytes: it enforces the size caps, and hands the video
+limits to the apps in `/api/v1/me` (and `/api/v1/health`) as `limits`. A modified client could send a longer video,
+but never past `MAX_UPLOAD_MB` or `DAILY_UPLOAD_MB`.
 
 ## Backups
 

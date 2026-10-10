@@ -6,6 +6,9 @@ services:
     environment:
       SNAP_TTL_HOURS: ${SNAP_TTL_HOURS:-24}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
+      MAX_VIDEO_SECONDS: ${MAX_VIDEO_SECONDS:-30}
+      VIDEO_KBPS: ${VIDEO_KBPS:-6000}
+      DAILY_UPLOAD_MB: ${DAILY_UPLOAD_MB:-500}
       RP_ID: ${RP_ID:-}
       # public address of the web app, only needed if your proxy rewrites the Host header
       ORIGIN: ${ORIGIN:-}

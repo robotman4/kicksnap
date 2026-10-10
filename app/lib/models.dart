@@ -14,15 +14,34 @@ class User {
   /// set while suspended; 0 = until an admin lifts it
   final int? suspendedUntil;
 
-  factory User.fromJson(Json j) => User(
+  factory User.fromJson(Json j) {
+    if (j['limits'] is Map) Limits.current = Limits.fromJson((j['limits'] as Map).cast<String, dynamic>());
+    return User(
         username: j['username'] as String?,
         color: (j['color'] as String?) ?? '#C6FF3D',
         admin: j['admin'] == true,
         suspendedUntil: j['suspended_until'] == null ? null : _int(j['suspended_until']),
       );
+  }
 
   User copyWith({String? color}) =>
       User(username: username, color: color ?? this.color, admin: admin, suspendedUntil: suspendedUntil);
+}
+
+/// The server's upload limits (MAX_UPLOAD_MB etc., docs/deploy.md), from /me.
+class Limits {
+  const Limits({this.uploadMb = 50, this.videoSeconds = 30, this.videoKbps = 6000, this.dailyMb = 500});
+  final int uploadMb, videoSeconds, videoKbps, dailyMb;
+
+  /// what this server allows; the defaults hold until /me says otherwise
+  static Limits current = const Limits();
+
+  factory Limits.fromJson(Json j) => Limits(
+        uploadMb: _int(j['upload_mb'] ?? 50),
+        videoSeconds: _int(j['video_seconds'] ?? 30),
+        videoKbps: _int(j['video_kbps'] ?? 6000),
+        dailyMb: _int(j['daily_mb'] ?? 500),
+      );
 }
 
 class Friend {
