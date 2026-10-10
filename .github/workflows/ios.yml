@@ -1,0 +1,30 @@
+name: ios
+
+# Proves the app still compiles for iPhone. Unsigned, so the output can't be installed;
+# signed builds are made on a Mac with Xcode (app/README.md).
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/ios.yml"]
+  pull_request:
+    paths: ["app/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.7"
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign --build-number=${{ github.run_number }}
