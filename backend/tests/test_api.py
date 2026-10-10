@@ -209,6 +209,9 @@ def test_passkeys_only_for_our_own_origin(client):
     # no Origin: the native app; only the Android app's own origin will verify (test_app_links...)
     assert client.post("/api/v1/passkeys/login/begin").status_code == 200
     assert client.post("/api/v1/passkeys/login/begin", headers={"Origin": "http://testserver"}).status_code == 200
+    # TLS proxy whose X-Forwarded-Proto isn't trusted: the request is http, the page https
+    assert client.post("/api/v1/passkeys/login/begin", headers={"Origin": "https://testserver"}).status_code == 200
+    assert client.post("/api/v1/passkeys/login/begin", headers={"Origin": "https://evil.testserver"}).status_code == 400
 
 
 def test_other_sites_cant_open_a_cookie_socket(new_user):

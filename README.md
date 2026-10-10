@@ -60,7 +60,8 @@ turn notifications on again. Payloads only say who sent something, never the sna
   if you serve on several hostnames. Passkeys need HTTPS (or `localhost`). The Android app uses the same
   passkeys: the server serves `/.well-known/assetlinks.json` for it (`ANDROID_APP_ID`, `ANDROID_CERTS`).
 - Passkeys and the web app's live connection only accept the server's own origin: the host the request came in
-  on. If your reverse proxy rewrites the `Host` header, set `ORIGIN` to the public address
+  on (http or https, so a TLS proxy works without `FORWARDED_ALLOW_IPS`). If your reverse proxy rewrites the
+  `Host` header, set `ORIGIN` to the public address
   (`https://kiks.example.com`, comma-separated for several).
 - The web app is served with a Content-Security-Policy (own scripts only), `X-Frame-Options: DENY` and `nosniff`.
 - Signed-in devices are listed under your face → "signed in on". Remove any from there.

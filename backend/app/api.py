@@ -43,7 +43,10 @@ def own_origin(request: HTTPConnection, origin: str | None) -> bool:
         return origin.rstrip("/") in ORIGINS
     scheme = {"ws": "http", "wss": "https"}.get(request.url.scheme, request.url.scheme)
     host = request.headers.get("host", "")
-    return origin.rstrip("/") == f"{scheme}://{host}"
+    # Behind a TLS proxy that uvicorn doesn't trust for X-Forwarded-Proto, the request looks like plain
+    # http while the page is https. Same host either way, and a browser can't forge Origin, so the https
+    # form of our own host is ours too. (Other hosts still need ORIGIN.)
+    return origin.rstrip("/") in {f"{scheme}://{host}", f"https://{host}"}
 
 
 def poll_secret(request: HTTPConnection, secret: str | None) -> str:
