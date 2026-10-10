@@ -25,6 +25,7 @@ from webauthn.helpers.structs import (
 from .api import API, COOKIE, device_token, wants_token
 from .limits import limit
 from .db import db
+from .hub import hub
 
 COOKIE_MAX_AGE = 400 * 24 * 3600  # browsers cap at ~400 days; refreshed on use
 LINK_TTL = 300
@@ -172,10 +173,13 @@ def me(ks_device: str | None = Depends(device_token)):
 
 
 @router.post("/auth/logout")
-def logout(response: Response, ks_device: str | None = Depends(device_token)):
+async def logout(response: Response, ks_device: str | None = Depends(device_token)):
     if ks_device:
         with db() as conn:
+            gone = conn.execute("SELECT id, user_id FROM devices WHERE token_hash = ?", (_hash(ks_device),)).fetchone()
             conn.execute("DELETE FROM devices WHERE token_hash = ?", (_hash(ks_device),))
+        if gone:
+            await hub.drop_device(gone["user_id"], gone["id"])
     response.delete_cookie(COOKIE)
     return {"ok": True}
 
@@ -195,10 +199,12 @@ def devices(ks_device: str | None = Depends(device_token)):
 
 
 @router.delete("/devices/{device_id}")
-def remove_device(device_id: int, ks_device: str | None = Depends(device_token)):
+async def remove_device(device_id: int, ks_device: str | None = Depends(device_token)):
     user = any_user(ks_device)
     with db() as conn:
         conn.execute("DELETE FROM devices WHERE id = ? AND user_id = ?", (device_id, user["id"]))
+    # a removed (lost, stolen) device stops getting live updates now, not when its socket next drops
+    await hub.drop_device(user["id"], device_id)
     return {"ok": True}
 
 
@@ -337,10 +343,15 @@ def passkey_register_finish(body: Finish, request: Request, ks_device: str | Non
         )
     except Exception as e:
         raise HTTPException(400, f"passkey failed: {e}")
+    cred_id = bytes_to_base64url(v.credential_id)
     with db() as conn:
+        # credential ids are picked by the authenticator: never let one take over someone else's row
+        owner = conn.execute("SELECT user_id FROM passkeys WHERE id = ?", (cred_id,)).fetchone()
+        if owner and owner["user_id"] != user["id"]:
+            raise HTTPException(400, "passkey failed: already in use")
         conn.execute(
             "INSERT OR REPLACE INTO passkeys VALUES (?, ?, ?, ?, ?)",
-            (bytes_to_base64url(v.credential_id), user["id"], v.credential_public_key, v.sign_count, now()),
+            (cred_id, user["id"], v.credential_public_key, v.sign_count, now()),
         )
     return {"ok": True}
 

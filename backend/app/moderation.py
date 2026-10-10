@@ -20,7 +20,7 @@ from .db import MEDIA_DIR, db
 from .hub import hub
 from .limits import limit
 from .keys import sha, signed_by, snap_signed_text, text_signed_text
-from .media import save_upload
+from .media import FILE_HEADERS, safe_mime, save_upload, upload_mime
 from .push import notify
 from .safety import any_named_user, tell_gone, wipe
 
@@ -155,7 +155,7 @@ async def report(
         raise HTTPException(400, f"pick up to {MAX_TEXTS} texts")
     if len(shots) > MAX_SHOTS:
         raise HTTPException(400, f"up to {MAX_SHOTS} screenshots")
-    if any(not (f.content_type or "").startswith("image/") for f in shots):
+    if any(not (upload_mime(f) or "").startswith("image/") for f in shots):
         raise HTTPException(400, "screenshots must be images")
     proofs = {int(p.get("id", 0)): p for p in (_json_form(text_proofs, list) or []) if isinstance(p, dict)}
     sproof = _json_form(snap_proof, dict)
@@ -189,8 +189,8 @@ async def report(
 
     media = mime = None
     if file and file.filename:
-        mime = file.content_type or ""
-        if not (mime.startswith("image/") or mime.startswith("video/")):
+        mime = upload_mime(file)
+        if not mime:
             raise HTTPException(400, "photos and videos only")
         REPORT_DIR.mkdir(parents=True, exist_ok=True)
         media = secrets.token_urlsafe(16)
@@ -214,7 +214,7 @@ async def report(
             REPORT_DIR.mkdir(parents=True, exist_ok=True)
             name = secrets.token_urlsafe(16)
             await save_upload(f, report_file(name), MAX_SHOT_MB * 1024 * 1024)
-            saved.append((name, f.content_type))
+            saved.append((name, upload_mime(f)))
     except HTTPException:
         for name in [n for n, _ in saved] + [n for n in (media, overlay_name) if n]:
             report_file(name).unlink(missing_ok=True)
@@ -322,7 +322,7 @@ def report_media(report_id: int, admin=Depends(admin_user)):
         r = conn.execute("SELECT media, media_mime FROM reports WHERE id = ?", (report_id,)).fetchone()
     if not r or not r["media"] or not report_file(r["media"]).exists():
         raise HTTPException(404, "gone")
-    return FileResponse(report_file(r["media"]), media_type=r["media_mime"], headers={"Cache-Control": "no-store"})
+    return FileResponse(report_file(r["media"]), media_type=safe_mime(r["media_mime"]) or "application/octet-stream", headers=FILE_HEADERS)
 
 
 @router.get("/admin/reports/{report_id}/shots/{item_id}")
@@ -331,7 +331,7 @@ def report_shot(report_id: int, item_id: int, admin=Depends(admin_user)):
         i = conn.execute("SELECT file, mime FROM report_items WHERE id = ? AND report_id = ?", (item_id, report_id)).fetchone()
     if not i or not i["file"] or not report_file(i["file"]).exists():
         raise HTTPException(404, "gone")
-    return FileResponse(report_file(i["file"]), media_type=i["mime"], headers={"Cache-Control": "no-store"})
+    return FileResponse(report_file(i["file"]), media_type=safe_mime(i["mime"]) or "application/octet-stream", headers=FILE_HEADERS)
 
 
 @router.post("/admin/reports/{report_id}/dismiss")

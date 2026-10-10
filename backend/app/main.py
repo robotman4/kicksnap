@@ -21,7 +21,7 @@ from .limits import limit
 from .db import db
 from .chat import are_friends, blocked, member_ids, router as chat_router
 from .hub import hub
-from .media import burn, media_path, overlay_path, save_upload
+from .media import FILE_HEADERS, burn, media_path, overlay_path, save_upload
 from .push import notify, router as push_router
 from .keys import router as keys_router, wraps_for
 from .moderation import router as moderation_router
@@ -36,6 +36,18 @@ errors.setup()
 app = FastAPI(title="Kiks", version=__version__, docs_url=f"{API}/docs", openapi_url=f"{API}/openapi.json")
 app.add_exception_handler(Exception, errors.unhandled)
 app.add_middleware(Unversioned)
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """No framing (the approve-a-device screen can't be clickjacked), no type sniffing, no leaking URLs."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    return response
+
+
 app.include_router(auth_router)
 app.include_router(push_router)
 app.include_router(chat_router)
@@ -70,6 +82,7 @@ async def socket(ws: WebSocket):
         await ws.close(code=4401)
         return
     await ws.accept()
+    ws.state.device_id = user["device_id"]
     hub.sockets[user["id"]].add(ws)
     try:
         while True:
@@ -253,7 +266,7 @@ def _delivery(conn, snap_id: str, user_id: int):
 def snap_media(snap_id: str, user=Depends(current_user)):
     with db() as conn:
         row = _delivery(conn, snap_id, user["id"])
-    return FileResponse(media_path(snap_id), media_type=row["mime"], headers={"Cache-Control": "no-store"})
+    return FileResponse(media_path(snap_id), media_type=row["mime"], headers=FILE_HEADERS)
 
 
 @app.get(API + "/snaps/{snap_id}/key")
@@ -280,7 +293,7 @@ def snap_overlay(snap_id: str, user=Depends(current_user)):
         row = _delivery(conn, snap_id, user["id"])
     if not overlay_path(snap_id).exists():
         raise HTTPException(404, "no overlay")
-    return FileResponse(overlay_path(snap_id), media_type="application/octet-stream" if row["e2e"] else "image/png", headers={"Cache-Control": "no-store"})
+    return FileResponse(overlay_path(snap_id), media_type="application/octet-stream" if row["e2e"] else "image/png", headers=FILE_HEADERS)
 
 
 @app.post(API + "/snaps/{snap_id}/open")

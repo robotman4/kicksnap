@@ -4,6 +4,12 @@ Versions follow [semver](https://semver.org). Release images: `ghcr.io/robotman4
 
 ## Unreleased
 
+- **Security fixes before beta.** Report screenshots and snaps can only be photo/video types, and every file the
+  server hands out is `nosniff` and sandboxed, so a reported "image" can't run script when an admin opens it.
+  Rate limits no longer reset when a request brings a made-up bearer token. A passkey can't overwrite another
+  account's. Signing out or removing a device closes its live connection right away. Pages can't be framed.
+  Reports from the Android app with a snap or screenshots attached work now (they were refused as "not images").
+
 - **Android app** (Flutter, [app/](app/README.md)). Camera-first like the web app: snaps, chats, groups,
   block/report, sign-in by QR from another device. Interoperates with the web app's E2E encryption; CI checks it
   against the real server on every build and publishes an APK to the `android-latest` pre-release. No push

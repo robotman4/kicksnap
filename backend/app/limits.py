@@ -1,24 +1,36 @@
 """
-Simple in-memory rate limits (one process). Keyed by device secret (cookie or bearer)
-when there is one, otherwise by client IP (uvicorn runs with --proxy-headers, so that's the
+Simple in-memory rate limits (one process). Keyed by device when the request carries a
+real device secret (cookie or bearer), otherwise by client IP. A made-up secret counts as
+none, or every request could bring a fresh one and never be limited (uvicorn runs with --proxy-headers, so that's the
 real IP behind a reverse proxy).
 """
+import hashlib
 import time
 from collections import defaultdict, deque
 
 from fastapi import HTTPException, Request
 
 from .api import device_token
+from .db import db
 
 _hits: dict[str, deque] = defaultdict(deque)
+
+
+def _caller(request: Request) -> str:
+    token = device_token(request)
+    if token:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        with db() as conn:
+            if conn.execute("SELECT 1 FROM devices WHERE token_hash = ?", (token_hash,)).fetchone():
+                return "d:" + token_hash
+    return "ip:" + (request.client.host if request.client else "?")
 
 
 def limit(name: str, times: int, per: int):
     """Dependency: allow `times` calls per `per` seconds for each caller."""
 
     def check(request: Request):
-        who = device_token(request) or (request.client.host if request.client else "?")
-        key = f"{name}:{who}"
+        key = f"{name}:{_caller(request)}"
         q = _hits[key]
         t = time.monotonic()
         while q and q[0] <= t - per:

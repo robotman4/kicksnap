@@ -16,5 +16,14 @@ class Hub:
             except Exception:
                 self.sockets[user_id].discard(ws)
 
+    async def drop_device(self, user_id: int, device_id: int):
+        """Close the sockets a signed-out or removed device still has open."""
+        for ws in [w for w in self.sockets.get(user_id, ()) if getattr(w.state, "device_id", None) == device_id]:
+            self.sockets[user_id].discard(ws)
+            try:
+                await ws.close(code=4401)
+            except Exception:
+                pass
+
 
 hub = Hub()
