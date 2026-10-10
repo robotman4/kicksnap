@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../e2e.dart' as e2e;
 import '../models.dart';
+import '../passkey.dart';
 import '../store.dart';
 import '../ui.dart';
 import 'home.dart';
@@ -21,6 +22,7 @@ class Settings extends StatefulWidget {
 
 class _SettingsState extends State<Settings> {
   List<Device> devices = [];
+  int passkeys = 0;
   List<Friend> blocked = [];
   bool deleting = false;
   final confirmName = TextEditingController();
@@ -39,7 +41,12 @@ class _SettingsState extends State<Settings> {
   Future<void> load() async {
     try {
       final d = await api.devices();
-      if (mounted) setState(() => devices = d);
+      if (mounted) {
+        setState(() {
+          devices = d.devices;
+          passkeys = d.passkeys;
+        });
+      }
     } catch (_) {}
   }
 
@@ -47,6 +54,19 @@ class _SettingsState extends State<Settings> {
     final code = await scan(context, 'scan the code on the new device');
     if (code == null || !mounted) return;
     if (await approveCode(context, model, code)) Future.delayed(const Duration(milliseconds: 2500), load);
+  }
+
+  Future<void> passkey() async {
+    try {
+      await addPasskey();
+      buzz(15);
+      if (mounted) toast(context, 'passkey added 🔑');
+      load();
+    } on PasskeyCancelled {
+      // closed the sheet
+    } on ApiError catch (e) {
+      if (mounted) toast(context, e.message);
+    }
   }
 
   Future<void> deleteAccount() async {
@@ -90,6 +110,11 @@ class _SettingsState extends State<Settings> {
               ),
             ),
           ]),
+          if (passkeysHere)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: _Tile(icon: Icons.fingerprint_rounded, label: passkeys > 0 ? 'passkeys · $passkeys' : 'add a passkey', onTap: passkey),
+            ),
           if (me.admin)
             Padding(
               padding: const EdgeInsets.only(top: 12),

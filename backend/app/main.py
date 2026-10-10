@@ -16,7 +16,10 @@ from pydantic import BaseModel
 
 from . import __version__, db as store, errors
 from .api import API, Unversioned, device_token, own_origin
-from .auth import current_user, public, router as auth_router, suspended, user_for_token
+from .auth import (
+    ANDROID_APP_ID, ANDROID_CERTS, IOS_APP_IDS, current_user, public, router as auth_router, suspended,
+    user_for_token,
+)
 from .limits import limit
 from .db import db
 from .chat import are_friends, blocked, member_ids, router as chat_router
@@ -76,6 +79,23 @@ app.include_router(keys_router)
 
 def now() -> int:
     return int(time.time())
+
+
+# --- app links: let the Android and iOS apps use passkeys made for this site -------------
+
+@app.get("/.well-known/assetlinks.json", include_in_schema=False)
+def assetlinks():
+    return [{
+        "relation": ["delegate_permission/common.handle_all_urls", "delegate_permission/common.get_login_creds"],
+        "target": {"namespace": "android_app", "package_name": ANDROID_APP_ID, "sha256_cert_fingerprints": ANDROID_CERTS},
+    }]
+
+
+@app.get("/.well-known/apple-app-site-association", include_in_schema=False)
+def apple_app_site_association():
+    if not IOS_APP_IDS:
+        raise HTTPException(404)
+    return {"webcredentials": {"apps": IOS_APP_IDS}}
 
 
 class Profile(BaseModel):

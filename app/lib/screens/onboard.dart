@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../api.dart';
 import '../e2e.dart' as e2e;
 import '../models.dart';
+import '../passkey.dart';
 import '../store.dart';
 import '../ui.dart';
 import 'terms.dart';
@@ -169,8 +170,7 @@ class _Go extends StatelessWidget {
       );
 }
 
-/// Returning user on a new device: approve this device from your phone.
-/// (Passkeys are left to the web app: they're bound to the server's domain.)
+/// Returning user on a new device: passkey, or approve this device from your phone.
 class _Back extends StatefulWidget {
   const _Back({required this.onBack, required this.onIn});
   final VoidCallback onBack;
@@ -181,8 +181,29 @@ class _Back extends StatefulWidget {
 
 class _BackState extends State<_Back> {
   String? code, check, qr;
-  bool alive = true;
+  bool alive = true, busy = false;
+  String error = '';
   Timer? timer;
+
+  Future<void> passkey() async {
+    buzz(10);
+    setState(() {
+      busy = true;
+      error = '';
+    });
+    try {
+      final u = await signInWithPasskey();
+      alive = false;
+      timer?.cancel();
+      widget.onIn(u); // this device has no keys yet: it asks another device for them (KeysSheet)
+    } on PasskeyCancelled {
+      // closed the sheet
+    } on ApiError catch (e) {
+      if (mounted) setState(() => error = e.status == 0 ? "can't reach the server" : e.message);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
 
   @override
   void initState() {
@@ -269,9 +290,12 @@ class _BackState extends State<_Back> {
             ]),
           ),
         ),
-        const Spacer(),
+        const SizedBox(height: 16),
         Text('Your other device sends this one your keys when it scans the code, so your snaps stay end-to-end encrypted.',
             style: font(15, weight: FontWeight.w600, color: Colors.white38)),
+        const Spacer(),
+        if (error.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 12), child: Center(child: Text(error, textAlign: TextAlign.center, style: font(16, color: danger)))),
+        if (passkeysHere) BigButton(label: 'use my passkey', icon: Icons.fingerprint_rounded, onTap: busy ? null : passkey),
       ]);
 }
 

@@ -19,6 +19,10 @@ Versions follow [semver](https://semver.org). Release images: `ghcr.io/robotman4
   block/report, sign-in by QR from another device. Interoperates with the web app's E2E encryption; CI checks it
   against the real server on every build and publishes an APK to the `android-latest` pre-release. No push
   notifications yet. iOS builds from the same code on a Mac.
+- **Passkeys in the Android app**: sign in and add one, same passkeys as the web. The server now serves
+  `/.well-known/assetlinks.json` for it. Operators: set `ANDROID_CERTS` to the release key's SHA-256 once there is
+  one (the default trusts the public dev key test builds use). `IOS_APP_IDS` turns on
+  `apple-app-site-association` for a future iPhone build.
 
 - **Snaps and chats are end-to-end encrypted** ([docs/e2e.md](docs/e2e.md)). Per-device keys, an account identity
   key that signs the device list and travels inside the QR link, "key changed" notices, verify by scanning a

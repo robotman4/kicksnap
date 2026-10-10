@@ -290,9 +290,24 @@ def link_approve(code: str, body: LinkApprove | None = None, ks_device: str | No
 
 _challenges: dict[str, tuple[bytes, int, int | None]] = {}  # id -> (challenge, created, user_id)
 
+# The native apps. Android signs a passkey request as "android:apk-key-hash:<sha256 of the app's signing
+# cert>" and only lets an app do that for a site whose /.well-known/assetlinks.json names it (main.py serves
+# it from these). iOS uses the site's own https origin, gated by apple-app-site-association.
+# The default cert is the public dev key test builds are signed with: set ANDROID_CERTS to the release key's
+# fingerprint (and drop the dev one) before handing the app to people.
+DEV_CERT = "5D:AB:F8:F4:0C:CF:9D:68:BC:30:02:2B:D3:D4:7A:3F:7F:B4:66:85:C4:86:B9:B3:42:06:75:3A:CC:1D:15:9E"
+ANDROID_APP_ID = os.getenv("ANDROID_APP_ID", "com.getkiks.app")
+ANDROID_CERTS = [c.strip().upper() for c in os.getenv("ANDROID_CERTS", DEV_CERT).split(",") if c.strip()]
+IOS_APP_IDS = [a.strip() for a in os.getenv("IOS_APP_IDS", "").split(",") if a.strip()]  # TEAMID.com.getkiks.app
 
-def _rp(request: Request) -> tuple[str, str]:
-    """RP ID and the origin the browser must have signed for: only our own, never one the request names."""
+
+def android_origins() -> list[str]:
+    return ["android:apk-key-hash:" + bytes_to_base64url(bytes.fromhex(c.replace(":", ""))) for c in ANDROID_CERTS]
+
+
+def _rp(request: Request) -> tuple[str, list[str]]:
+    """RP ID and the origins a passkey may have signed for: our own web app (never one the request names)
+    and our Android app. The native app sends this server's address as Origin, like a browser would."""
     origin = request.headers.get("origin") or ""
     if not own_origin(request, origin):
         raise HTTPException(400, "passkey failed: open Kiks on its own address")
@@ -300,7 +315,7 @@ def _rp(request: Request) -> tuple[str, str]:
     rp_id = os.getenv("RP_ID") or host
     if host != rp_id and not host.endswith("." + rp_id):
         raise HTTPException(400, "passkey failed: this address doesn't match RP_ID")
-    return rp_id, origin
+    return rp_id, [origin, *android_origins()]
 
 
 def _stash(challenge: bytes, user_id: int | None) -> str:

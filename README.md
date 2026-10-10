@@ -57,7 +57,8 @@ turn notifications on again. Payloads only say who sent something, never the sna
 - Linking a device: the new one shows a 6-character code (and QR), valid 5 minutes. A signed-in device scans
   it (or types it) and approves. The new device's poll then gets its own cookie.
 - Passkeys are WebAuthn, discoverable credentials. The relying-party ID defaults to the request host; set `RP_ID`
-  if you serve on several hostnames. Passkeys need HTTPS (or `localhost`).
+  if you serve on several hostnames. Passkeys need HTTPS (or `localhost`). The Android app uses the same
+  passkeys: the server serves `/.well-known/assetlinks.json` for it (`ANDROID_APP_ID`, `ANDROID_CERTS`).
 - Passkeys and the web app's live connection only accept the server's own origin: the host the request came in
   on. If your reverse proxy rewrites the `Host` header, set `ORIGIN` to the public address
   (`https://kiks.example.com`, comma-separated for several).

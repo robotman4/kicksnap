@@ -21,7 +21,7 @@ switching servers means signing out first (your face → sign out). To ship a bu
 the repo variable `KIKS_SERVER` (Settings → Secrets and variables → Actions → Variables), e.g.
 `https://kiks.example.com`.
 
-Sign in: "I've got an account" shows a QR. On a device that's already signed in (web or app): tap your face →
+Sign in: "I've got an account" shows a QR, and on Android a "use my passkey" button (see Passkeys below). On a device that's already signed in (web or app): tap your face →
 add a device → scan it. That also moves your encryption keys, so the new phone can open snaps right away.
 
 ## Develop
@@ -138,7 +138,27 @@ compliance: the app uses standard encryption (end-to-end messaging), which needs
 Known iOS gaps to check on the first run: videos recorded by Chrome on Android with the web app (WebM) don't
 play on iPhone (the native apps record MP4, which plays everywhere); screenshots can't be blocked on iOS.
 
+## Passkeys
+
+Android: sign in with a passkey ("I've got an account" → use my passkey) and add one (your face → add a
+passkey). Same passkeys as the web app on that server, through Android's Credential Manager (Google Password
+Manager or whatever passkey provider the phone uses). Like on the web, a passkey sign-in doesn't bring your
+encryption keys: the phone then asks one of your other devices for them.
+
+It works on any Kiks server because the server tells Android it trusts the app: it serves
+`/.well-known/assetlinks.json` naming `com.getkiks.app` and the signing key's SHA-256 (server env
+`ANDROID_APP_ID`, `ANDROID_CERTS`). The server has to be at the root of its domain, and `RP_ID` (if set) has to
+be that domain.
+
+**Before real users:** `ANDROID_CERTS` defaults to the public dev key that test builds are signed with. Anyone
+can sign an app with that key, so once there's a release key, set `ANDROID_CERTS` on the server to its
+fingerprint only (`keytool -list -v -keystore kiks-release.jks | grep SHA256`).
+
+iPhone: not yet. It needs the paid Apple account: the Associated Domains capability with
+`webcredentials:snap.getkiks.com` in Xcode, `IOS_APP_IDS=<TEAMID>.com.getkiks.app` on the server (it then serves
+`apple-app-site-association`), and the Swift side of the passkey channel. iOS only trusts domains compiled into
+the app, so on iPhone passkeys would work for snap.getkiks.com but not self-hosted servers.
+
 ## Not in the app (use the web app)
 
-Passkeys (bound to the server's domain, which a store app can't declare for every self-hosted server), the
-admin view, and saving a snap to the gallery.
+The admin view, saving a snap to the gallery, and passkeys on iPhone (above).

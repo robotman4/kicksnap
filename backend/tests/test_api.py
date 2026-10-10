@@ -187,6 +187,16 @@ def test_native_report_files_get_their_type_from_the_name(friends):
     assert a.post("/api/v1/reports", data={"username": b.name, "reason": "spam"}, files={"shots": shot}).status_code == 200
 
 
+def test_app_links_for_native_passkeys(client):
+    from app.auth import DEV_CERT, android_origins
+    links = client.get("/.well-known/assetlinks.json").json()
+    assert links[0]["target"]["package_name"] == "com.getkiks.app"
+    assert "delegate_permission/common.get_login_creds" in links[0]["relation"]
+    assert links[0]["target"]["sha256_cert_fingerprints"] == [DEV_CERT]
+    assert android_origins() == ["android:apk-key-hash:Xav49AzPnWi8MAIr09R6P3-0ZoXEhrmzQgZ1OswdFZ4"]
+    assert client.get("/.well-known/apple-app-site-association").status_code == 404  # IOS_APP_IDS unset
+
+
 def test_passkeys_only_for_our_own_origin(client):
     assert client.post("/api/v1/passkeys/login/begin", headers={"Origin": "https://evil.example"}).status_code == 400
     assert client.post("/api/v1/passkeys/login/begin").status_code == 400  # no Origin: not a browser

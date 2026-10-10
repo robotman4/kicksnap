@@ -137,6 +137,24 @@ class Api {
     await Store.setToken(t);
   }
 
+  // Passkeys: the server checks the origin a passkey signed for, so these send this server's address as
+  // Origin the way a browser would (the signature itself carries the app's own origin).
+  Map<String, String> get _origin => {'Origin': Uri.parse(server).origin};
+
+  Future<({String id, String options})> passkeyBegin(String what) async {
+    final r = await _send('POST', '/passkeys/$what/begin', body: const {}, headers: _origin) as Json;
+    return (id: r['challenge_id'] as String, options: r['options'] as String);
+  }
+
+  Future<void> passkeyRegisterFinish(String id, Object credential) =>
+      _send('POST', '/passkeys/register/finish', body: {'challenge_id': id, 'credential': credential}, headers: _origin);
+
+  Future<User> passkeyLoginFinish(String id, Object credential) async {
+    final r = await _send('POST', '/passkeys/login/finish', body: {'challenge_id': id, 'credential': credential}, headers: _origin, wantToken: true) as Json;
+    await _keepToken(r);
+    return User.fromJson(r);
+  }
+
   Future<({bool free, bool valid})> nameFree(String name) async {
     final r = await get('/names/${Uri.encodeComponent(name)}');
     return (free: r['free'] == true, valid: r['valid'] == true);
@@ -187,7 +205,10 @@ class Api {
 
   // --- devices, friends, blocks ---------------------------------------------------------
 
-  Future<List<Device>> devices() async => ((await get('/devices'))['devices'] as List).map((d) => Device.fromJson(d as Json)).toList();
+  Future<({List<Device> devices, int passkeys})> devices() async {
+    final r = await get('/devices') as Json;
+    return (devices: (r['devices'] as List).map((d) => Device.fromJson(d as Json)).toList(), passkeys: (r['passkeys'] as int?) ?? 0);
+  }
   Future<void> removeDevice(int id) => delete('/devices/$id');
 
   Future<FriendLists> friends() async => FriendLists.fromJson(await get('/friends'));

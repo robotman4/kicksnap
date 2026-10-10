@@ -74,3 +74,9 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // passkeys (MainActivity): Credential Manager, with Google Password Manager on older Androids
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
+}

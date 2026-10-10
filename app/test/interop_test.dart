@@ -160,6 +160,14 @@ void main() {
     await api.report(username: alice.name, reason: 'spam', note: 'interop test', block: false, texts: texts.take(2).toList());
   }, skip: skip);
 
+  test('passkey ceremonies start for the app (Origin = the server)', () async {
+    await use(alice);
+    final login = await api.passkeyBegin('login');
+    expect(jsonDecode(login.options)['rpId'], Uri.parse(server!).host);
+    final reg = await api.passkeyBegin('register');
+    expect(jsonDecode(reg.options)['user']['name'], alice.name);
+  }, skip: skip);
+
   test('fingerprints match across devices of one account', () async {
     await use(alice);
     final a = (await e2e.ensure(alice.name)).fingerprint;
