@@ -4,7 +4,7 @@ import { Avatar } from "../components/Avatar";
 import { Media } from "../components/Media";
 import { Sheet } from "../components/Sheet";
 import { buzz, containRect, onColor, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
-import { applyLook, LookDefs, lookCss, LOOKS, luminance, SPECTRUM, spectrumAt } from "../lib/looks";
+import { applyLook, hasVignette, LookDefs, lookCss, LOOKS, luminance, SPECTRUM, spectrumAt, vignetteCss } from "../lib/looks";
 import { useVisualViewport } from "../lib/viewport";
 import { Capture } from "./Camera";
 
@@ -319,7 +319,7 @@ export function Preview({
       style={typing && vv.top ? { transform: `translateY(${vv.top}px)` } : undefined}
     >
       <LookDefs />
-      <Media src={capture.url} kind={capture.kind} loop onDims={setDims} filter={lookCss(look)} />
+      <Media src={capture.url} kind={capture.kind} loop onDims={setDims} filter={lookCss(look)} frame={rect} overlay={hasVignette(look) ? vignetteCss : undefined} />
 
       <canvas
         ref={canvas}
@@ -423,13 +423,20 @@ export function Preview({
       </div>
 
       {mode === "look" && (
-        <div className="absolute inset-x-0 bottom-0 flex justify-end px-4 pb-[max(env(safe-area-inset-bottom),20px)]">
+        // the send bar: full width, under the photo (on short screens it sits on its bottom edge)
+        <div className="absolute inset-x-0 bottom-0 px-4 pb-[max(env(safe-area-inset-bottom),12px)]">
           <button
             onClick={() => (preselect.length ? send(preselect) : setPicking(true))}
             disabled={sending}
-            className="flex items-center gap-3 rounded-full bg-accent py-5 pl-8 pr-6 text-2xl font-black text-black shadow-[0_6px_0_rgba(0,0,0,.35)] transition ease-spring active:translate-y-1 active:scale-95 active:shadow-none disabled:opacity-60"
+            className="flex h-[60px] w-full items-center gap-3 rounded-full bg-accent pl-6 pr-5 text-black shadow-[0_4px_0_rgba(0,0,0,.35)] transition ease-spring active:translate-y-1 active:scale-[.97] active:shadow-none disabled:opacity-60"
           >
-            {preselect.length ? nameOf(preselect[0]) : "send to"}
+            <span className="flex-1 truncate text-left text-[22px] font-black">{preselect.length ? `send to ${nameOf(preselect[0])}` : "send to…"}</span>
+            {capture.kind === "photo" && (
+              <span className="flex items-center gap-1 text-[15px] font-extrabold opacity-60">
+                <Timer size={18} strokeWidth={2.75} />
+                {timerLabel(seconds)}
+              </span>
+            )}
             <Send size={26} strokeWidth={2.75} />
           </button>
         </div>
@@ -440,7 +447,10 @@ export function Preview({
             {LOOKS.map((f) => (
               <button key={f.name} onClick={() => (buzz(4), setLook(f.name))} className="flex shrink-0 flex-col items-center gap-1 transition ease-spring active:scale-95">
                 <span className={`block h-[76px] w-[68px] rounded-[18px] p-[3px] transition ${look === f.name ? "bg-white" : ""}`}>
-                  <img src={capture.url} alt="" className="h-full w-full rounded-[15px] object-cover" style={{ filter: lookCss(f.name) }} />
+                  <span className="relative block h-full w-full overflow-hidden rounded-[15px]">
+                    <img src={capture.url} alt="" className="h-full w-full object-cover" style={{ filter: lookCss(f.name) }} />
+                    {f.vignette && <span className="absolute inset-0" style={{ background: vignetteCss }} />}
+                  </span>
                 </span>
                 <span className={`text-[13px] font-extrabold ${look === f.name ? "text-white" : "text-white/70"}`}>{f.name}</span>
               </button>

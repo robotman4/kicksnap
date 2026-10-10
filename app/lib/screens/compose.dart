@@ -166,11 +166,11 @@ Future<Made> compose(Capture cap, Size dims, Size screen, List<Stroke> strokes, 
     if (!decorated) return (media: media, overlay: null, mime: videoMime(cap.path));
     final fit = (maxSide / (dims.width > dims.height ? dims.width : dims.height)).clamp(0, 1).toDouble();
     final w = (dims.width * fit).round(), h = (dims.height * fit).round();
-    final png = await _render(w, h, screen, r, strokes, label, null, Rect.zero, false, null);
+    final png = await _render(w, h, screen, r, strokes, label, null, Rect.zero, false, looks.first);
     return (media: media, overlay: png, mime: videoMime(cap.path));
   }
 
-  if (!decorated && !cap.mirror && cap.crop == null && look.matrix == null) {
+  if (!decorated && !cap.mirror && cap.crop == null && look.plain) {
     // nothing to draw: re-encode natively, which also turns it upright and strips EXIF (GPS etc.)
     final jpeg = await FlutterImageCompress.compressWithFile(cap.path, minWidth: 3072, minHeight: 3072, quality: 92, keepExif: false, autoCorrectionAngle: true);
     if (jpeg != null) return (media: jpeg, overlay: null, mime: 'image/jpeg');
@@ -181,12 +181,12 @@ Future<Made> compose(Capture cap, Size dims, Size screen, List<Stroke> strokes, 
   final src = cropRect(Size(img.width.toDouble(), img.height.toDouble()), cap.crop);
   final fit = (maxSide / (src.width > src.height ? src.width : src.height)).clamp(0, 1).toDouble();
   final w = (src.width * fit).round(), h = (src.height * fit).round();
-  final png = await _render(w, h, screen, containRect(Size(w.toDouble(), h.toDouble()), screen), strokes, label, img, src, cap.mirror, look.matrix);
+  final png = await _render(w, h, screen, containRect(Size(w.toDouble(), h.toDouble()), screen), strokes, label, img, src, cap.mirror, look);
   final jpeg = await FlutterImageCompress.compressWithList(png, minWidth: 8192, minHeight: 8192, quality: 92, format: CompressFormat.jpeg, keepExif: false);
   return (media: jpeg, overlay: null, mime: 'image/jpeg');
 }
 
-Future<Uint8List> _render(int w, int h, Size screen, Rect r, List<Stroke> strokes, TextLabel? label, ui.Image? photo, Rect src, bool mirror, List<double>? matrix) async {
+Future<Uint8List> _render(int w, int h, Size screen, Rect r, List<Stroke> strokes, TextLabel? label, ui.Image? photo, Rect src, bool mirror, Look look) async {
   final rec = ui.PictureRecorder();
   final canvas = Canvas(rec, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
   if (photo != null) {
@@ -196,9 +196,10 @@ Future<Uint8List> _render(int w, int h, Size screen, Rect r, List<Stroke> stroke
       canvas.scale(-1, 1);
     }
     final paint = Paint()..filterQuality = FilterQuality.high;
-    if (matrix != null) paint.colorFilter = ColorFilter.matrix(matrix);
+    if (look.matrix != null) paint.colorFilter = ColorFilter.matrix(look.matrix!);
     canvas.drawImageRect(photo, src, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()), paint);
     canvas.restore();
+    if (look.vignette) paintVignette(canvas, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
   }
   // screen px -> media px, through the rect the media is shown in
   final k = w / r.width;
@@ -214,9 +215,20 @@ Future<Uint8List> _render(int w, int h, Size screen, Rect r, List<Stroke> stroke
 /// Photo filters: a colour matrix each (5x4, offsets in 0..255).
 /// Same numbers as LOOKS in frontend/src/lib/looks.ts.
 class Look {
-  const Look(this.name, this.matrix);
+  const Look(this.name, this.matrix, {this.vignette = false});
   final String name;
   final List<double>? matrix;
+
+  /// darker edges, painted over the photo
+  final bool vignette;
+  bool get plain => matrix == null && !vignette;
+}
+
+/// The vignette: clear in the middle, darkening to the corners (a circle out to the corners).
+/// Same stops as VIGNETTE in frontend/src/lib/looks.tsx.
+void paintVignette(Canvas canvas, Rect r) {
+  final radius = r.size.longestSide == 0 ? 0.0 : (r.bottomRight - r.center).distance;
+  canvas.drawRect(r, Paint()..shader = ui.Gradient.radial(r.center, radius, const [Color(0x00000000), Color(0x2E000000), Color(0xA6000000)], const [.45, .7, 1]));
 }
 
 const looks = [
@@ -227,6 +239,7 @@ const looks = [
   Look('mono', [0.2126, 0.7152, 0.0722, 0, 0, 0.2126, 0.7152, 0.0722, 0, 0, 0.2126, 0.7152, 0.0722, 0, 0, 0, 0, 0, 1, 0]),
   Look('noir', [0.3083, 1.037, 0.1047, 0, -67.6, 0.3083, 1.037, 0.1047, 0, -67.6, 0.3083, 1.037, 0.1047, 0, -67.6, 0, 0, 0, 1, 0]),
   Look('fade', [0.5558, 0.3083, 0.0567, 0, 37.04, 0.1175, 0.7095, 0.0513, 0, 37.04, 0.0965, 0.2373, 0.4681, 0, 37.04, 0, 0, 0, 1, 0]),
+  Look('vignette', null, vignette: true),
 ];
 
 /// Snaps are mostly shown in the accent; kept here so the editor and the composer agree.

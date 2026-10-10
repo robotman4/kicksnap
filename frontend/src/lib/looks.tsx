@@ -4,7 +4,7 @@
  */
 
 /** 5x4 colour matrices, row-major, offsets in 0..255. */
-export const LOOKS: { name: string; m: number[] | null }[] = [
+export const LOOKS: { name: string; m: number[] | null; vignette?: boolean }[] = [
   { name: "original", m: null },
   { name: "vivid", m: [1.4627, -0.3476, -0.0351, 0, -10.24, -0.1033, 1.2184, -0.0351, 0, -10.24, -0.1033, -0.3476, 1.5309, 0, -10.24, 0, 0, 0, 1, 0] },
   { name: "warm", m: [1.1435, -0.0758, -0.0077, 0, 12, -0.0213, 1.0285, -0.0072, 0, 4, -0.0183, -0.0615, 0.9398, 0, 0, 0, 0, 0, 1, 0] },
@@ -12,7 +12,13 @@ export const LOOKS: { name: string; m: number[] | null }[] = [
   { name: "mono", m: [0.2126, 0.7152, 0.0722, 0, 0, 0.2126, 0.7152, 0.0722, 0, 0, 0.2126, 0.7152, 0.0722, 0, 0, 0, 0, 0, 1, 0] },
   { name: "noir", m: [0.3083, 1.037, 0.1047, 0, -67.6, 0.3083, 1.037, 0.1047, 0, -67.6, 0.3083, 1.037, 0.1047, 0, -67.6, 0, 0, 0, 1, 0] },
   { name: "fade", m: [0.5558, 0.3083, 0.0567, 0, 37.04, 0.1175, 0.7095, 0.0513, 0, 37.04, 0.0965, 0.2373, 0.4681, 0, 37.04, 0, 0, 0, 1, 0] },
+  { name: "vignette", m: null, vignette: true },
 ];
+
+/** Darker edges: clear in the middle, a circle out to the corners. Same stops as paintVignette in compose.dart. */
+const VIGNETTE: [number, number][] = [[0.45, 0], [0.7, 0.18], [1, 0.65]];
+export const vignetteCss = `radial-gradient(circle farthest-corner, ${VIGNETTE.map(([s, a]) => `rgba(0,0,0,${a}) ${s * 100}%`).join(", ")})`;
+export const hasVignette = (name: string) => !!LOOKS.find((l) => l.name === name)?.vignette;
 
 /** SVG filter defs for the live preview (feColorMatrix wants offsets in 0..1, and sRGB like the canvas). */
 export function LookDefs() {
@@ -33,6 +39,12 @@ export const lookCss = (name: string) => (name === "original" ? undefined : `url
 
 /** Bake a look into pixels (the canvas output; ctx.filter isn't in Safari). */
 export function applyLook(ctx: CanvasRenderingContext2D, w: number, h: number, name: string) {
+  if (hasVignette(name)) {
+    const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.hypot(w, h) / 2);
+    for (const [s, a] of VIGNETTE) g.addColorStop(s, `rgba(0,0,0,${a})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  }
   const m = LOOKS.find((l) => l.name === name)?.m;
   if (!m) return;
   const img = ctx.getImageData(0, 0, w, h);

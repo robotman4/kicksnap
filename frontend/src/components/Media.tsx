@@ -9,6 +9,8 @@ export function Media({
   onEnded,
   onDims,
   filter,
+  frame,
+  overlay,
 }: {
   src: string;
   kind: "photo" | "video";
@@ -17,7 +19,27 @@ export function Media({
   onDims?: (d: { w: number; h: number }) => void;
   /** CSS filter for the photo (the editor's looks) */
   filter?: string;
+  /** the editor: show it in this rect (where contain puts it) with the viewfinder's rounded corners, no blurred fill */
+  frame?: { x: number; y: number; w: number; h: number };
+  /** drawn over the media inside the frame (the vignette) */
+  overlay?: string;
 }) {
+  if (frame) {
+    const dims = (e: React.SyntheticEvent<HTMLImageElement | HTMLVideoElement>) => {
+      const t = e.currentTarget;
+      onDims?.(t instanceof HTMLVideoElement ? { w: t.videoWidth, h: t.videoHeight } : { w: t.naturalWidth, h: t.naturalHeight });
+    };
+    return (
+      <div className="absolute overflow-hidden rounded-[24px]" style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}>
+        {kind === "photo" ? (
+          <img src={src} alt="" className="h-full w-full object-cover" style={filter ? { filter } : undefined} onLoad={dims} />
+        ) : (
+          <video src={src} autoPlay loop={loop} playsInline className="h-full w-full object-cover" onLoadedMetadata={dims} onEnded={onEnded} />
+        )}
+        {overlay && <div className="pointer-events-none absolute inset-0" style={{ background: overlay }} />}
+      </div>
+    );
+  }
   return (
     <>
       {kind === "photo" && (

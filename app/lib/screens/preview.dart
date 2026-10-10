@@ -215,7 +215,7 @@ class _PreviewState extends State<Preview> {
               ],
               if (mode == 'look' && !isVideo) ...[
                 const SizedBox(height: 12),
-                RoundButton(icon: Icons.auto_awesome_rounded, tint: look.matrix != null ? Colors.white : null, onTap: () {
+                RoundButton(icon: Icons.auto_awesome_rounded, tint: look.plain ? null : Colors.white, onTap: () {
                   buzz(6);
                   setState(() => mode = 'filter');
                 }),
@@ -231,26 +231,33 @@ class _PreviewState extends State<Preview> {
               ],
             ]),
           ),
+          // the send bar: full width, under the photo (on short screens it sits on its bottom edge)
           if (mode == 'look')
             Positioned(
+              left: 16,
               right: 16,
-              bottom: pad.bottom + 20,
+              bottom: pad.bottom + 12,
               child: ValueListenableBuilder(
                 valueListenable: accent,
                 builder: (_, a, _) => Press(
                   onTap: sending ? null : () => widget.preselect.isNotEmpty ? send(widget.preselect, screen) : pickTargets(screen),
-                  scale: .95,
+                  scale: .97,
                   haptic: 8,
                   child: Container(
-                    padding: const EdgeInsets.fromLTRB(32, 20, 24, 20),
-                    decoration: BoxDecoration(color: a, borderRadius: BorderRadius.circular(99), boxShadow: const [BoxShadow(color: Colors.black38, offset: Offset(0, 6))]),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: screen.width * .55),
-                        child: Text(widget.preselect.isNotEmpty ? nameOf(widget.preselect.first) : 'send to',
-                            overflow: TextOverflow.ellipsis, style: font(24, weight: FontWeight.w900, color: onColor(a))),
+                    height: 60,
+                    padding: const EdgeInsets.fromLTRB(24, 0, 20, 0),
+                    decoration: BoxDecoration(color: a, borderRadius: BorderRadius.circular(99), boxShadow: const [BoxShadow(color: Colors.black38, offset: Offset(0, 4))]),
+                    child: Row(children: [
+                      Expanded(
+                        child: Text(widget.preselect.isNotEmpty ? 'send to ${nameOf(widget.preselect.first)}' : 'send to…',
+                            overflow: TextOverflow.ellipsis, style: font(22, weight: FontWeight.w900, color: onColor(a))),
                       ),
-                      const SizedBox(width: 12),
+                      if (!isVideo) ...[
+                        Icon(Icons.timer_rounded, size: 18, color: onColor(a).withValues(alpha: .6)),
+                        const SizedBox(width: 3),
+                        Text(timerLabel(seconds), style: font(15, weight: FontWeight.w800, color: onColor(a).withValues(alpha: .6))),
+                        const SizedBox(width: 14),
+                      ],
                       Icon(Icons.send_rounded, size: 26, color: onColor(a)),
                     ]),
                   ),
@@ -280,19 +287,26 @@ class _PreviewState extends State<Preview> {
     );
   }
 
-  Widget _filtered(List<double>? m, Widget child) => m == null ? child : ColorFiltered(colorFilter: ColorFilter.matrix(m), child: child);
+  Widget _filtered(Look l, Widget child) {
+    if (l.matrix != null) child = ColorFiltered(colorFilter: ColorFilter.matrix(l.matrix!), child: child);
+    if (l.vignette) child = CustomPaint(foregroundPainter: _Vignette(), child: child);
+    return child;
+  }
 
+  /// The media in its spot, with the viewfinder's rounded corners.
   Widget _media(Rect r) {
-    if (isVideo) {
-      final v = video;
-      if (v == null || !v.value.isInitialized) return const SizedBox();
-      return FittedBox(fit: BoxFit.contain, child: SizedBox(width: v.value.size.width, height: v.value.size.height, child: VideoPlayer(v)));
-    }
     if (dims.isEmpty) return const SizedBox();
-    // the photo whole, or the camera's crop of it (the middle, like the viewfinder)
-    Widget img = Image.file(File(widget.capture.path), fit: BoxFit.cover, width: r.width, height: r.height);
-    if (widget.capture.mirror) img = Transform.flip(flipX: true, child: img);
-    return Stack(children: [Positioned.fromRect(rect: r, child: ClipRect(child: _filtered(look.matrix, img)))]);
+    Widget media;
+    if (isVideo) {
+      final v = video!;
+      media = FittedBox(fit: BoxFit.cover, child: SizedBox(width: v.value.size.width, height: v.value.size.height, child: VideoPlayer(v)));
+    } else {
+      // the photo whole, or the camera's crop of it (the middle, like the viewfinder)
+      media = Image.file(File(widget.capture.path), fit: BoxFit.cover, width: r.width, height: r.height);
+      if (widget.capture.mirror) media = Transform.flip(flipX: true, child: media);
+      media = _filtered(look, media);
+    }
+    return Stack(children: [Positioned.fromRect(rect: r, child: ClipRRect(borderRadius: BorderRadius.circular(viewRadius), child: media))]);
   }
 
   /// The filter strip: the photo in each look, tap one to use it.
@@ -319,7 +333,7 @@ class _PreviewState extends State<Preview> {
                     decoration: BoxDecoration(borderRadius: BorderRadius.circular(18), color: f == look ? Colors.white : Colors.transparent),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(15),
-                      child: Transform.flip(flipX: widget.capture.mirror, child: _filtered(f.matrix, thumb)),
+                      child: _filtered(f, Transform.flip(flipX: widget.capture.mirror, child: thumb)),
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -527,6 +541,13 @@ class _PaletteState extends State<Palette> {
       ]),
     );
   }
+}
+
+class _Vignette extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) => paintVignette(canvas, Offset.zero & size);
+  @override
+  bool shouldRepaint(_Vignette old) => false;
 }
 
 class _Ink extends CustomPainter {
