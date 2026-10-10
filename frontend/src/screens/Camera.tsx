@@ -2,8 +2,8 @@ import { Images, MessageCircle, RefreshCcw, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Friend, limits } from "../lib/api";
-import { buzz, containRect, pref } from "../lib/feel";
-import { cropRect, VIEW_ASPECT } from "../lib/looks";
+import { BOTTOM_BAR, buzz, mediaArea, pref } from "../lib/feel";
+import { cropRect } from "../lib/looks";
 
 export type Capture = { blob: Blob; kind: "photo" | "video"; url: string };
 
@@ -33,11 +33,11 @@ const MAX_DIGITAL_ZOOM = 5;
 const RADIUS = 24;
 
 /**
- * The photo as the viewfinder showed it: the middle of the frame in VIEW_ASPECT, then
+ * The photo as the viewfinder showed it: the middle of the frame in its shape (`aspect`), then
  * `zoom` (digital zoom, when the camera can't zoom itself), mirrored for selfies.
  */
-function shape(src: CanvasImageSource, sw: number, sh: number, zoom: number, mirrored: boolean) {
-  const r = cropRect(sw, sh);
+function shape(src: CanvasImageSource, sw: number, sh: number, zoom: number, mirrored: boolean, aspect: number) {
+  const r = cropRect(sw, sh, aspect);
   const w = r.w / zoom;
   const h = r.h / zoom;
   const c = document.createElement("canvas");
@@ -107,12 +107,10 @@ export function Camera({
   const [recording, setRecording] = useState(false);
   const [flash, setFlash] = useState(false);
   const mirrored = facing === "user";
-  // The viewfinder: VIEW_ASPECT, as big as fits, centred; the same spot the editor shows
-  // the photo afterwards (contain), so nothing jumps after the shutter.
-  // (a landscape stream, like a laptop's webcam, gets a landscape viewfinder: photos are cropped the same way)
+  // The viewfinder fills the screen above the shutter bar; photos are cropped to its shape, so
+  // the editor shows them in the same spot and nothing jumps after the shutter.
   const win = useWindowSize();
-  const [landscape, setLandscape] = useState(false);
-  const card = landscape ? containRect(1 / VIEW_ASPECT, 1, win.w, win.h) : containRect(VIEW_ASPECT, 1, win.w, win.h);
+  const card = mediaArea(win.w, win.h);
   // zoom: the camera's own when it has one (Chrome on Android), else digital (scale + crop)
   const [zoom, setZoom] = useState(1);
   const [showZoom, setShowZoom] = useState(false);
@@ -230,14 +228,14 @@ export function Camera({
         blob = await Promise.race([shot, new Promise<null>((ok) => setTimeout(() => ok(null), 3000))]);
         if (blob) {
           const bmp = await createImageBitmap(blob);
-          blob = await shape(bmp, bmp.width, bmp.height, digital(), mirrored);
+          blob = await shape(bmp, bmp.width, bmp.height, digital(), mirrored, card.w / card.h);
         }
       } catch {
         blob = null;
       }
     }
     // last resort: the current preview frame at full stream resolution
-    if (!blob && v.videoWidth) blob = await shape(v, v.videoWidth, v.videoHeight, digital(), mirrored);
+    if (!blob && v.videoWidth) blob = await shape(v, v.videoWidth, v.videoHeight, digital(), mirrored, card.w / card.h);
     if (blob) onCapture({ blob, kind: "photo", url: URL.createObjectURL(blob) });
   };
 
@@ -365,14 +363,12 @@ export function Camera({
           playsInline
           muted
           className="pointer-events-auto h-full w-full object-cover"
-          onLoadedMetadata={(e) => setLandscape(e.currentTarget.videoWidth > e.currentTarget.videoHeight)}
-          onResize={(e) => setLandscape(e.currentTarget.videoWidth > e.currentTarget.videoHeight)}
           style={{ transform: `scale(${mirrored ? -digital() : digital()}, ${digital()})` }}
         />
       </div>
       <div
         className={`pointer-events-none absolute flex justify-center transition-opacity duration-200 ${showZoom ? "opacity-100" : "opacity-0"}`}
-        style={{ left: card.x, width: card.w, top: card.y + 16 }}
+        style={{ left: card.x, width: card.w, top: card.y + card.h - 52 }}
       >
         <span className="rounded-full bg-black/55 px-3 py-1.5 text-base font-black text-white">{(zoom / zoomRange.current.min).toFixed(1)}×</span>
       </div>
@@ -415,7 +411,11 @@ export function Camera({
       </div>
 
       {/* bottom bar */}
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/40 to-transparent px-8 pb-[max(env(safe-area-inset-bottom),20px)] pt-16">
+      {/* the bar under the viewfinder, same height as the editor's send bar */}
+      <div
+        className="absolute inset-x-0 bottom-0 flex items-center justify-between px-8"
+        style={{ height: `calc(${BOTTOM_BAR}px + env(safe-area-inset-bottom))`, paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
         <IconButton label="chats" onClick={onChats} big>
           <MessageCircle size={32} strokeWidth={2.5} />
           {unread > 0 && (

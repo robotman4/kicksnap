@@ -64,3 +64,25 @@ export function containRect(nw: number, nh: number, W = window.innerWidth, H = w
   const s = Math.min(W / nw, H / nh);
   return { x: (W - nw * s) / 2, y: (H - nh * s) / 2, w: nw * s, h: nh * s };
 }
+
+/** Height of the bar under the picture (shutter on the camera, send in the editor), above the safe area. */
+export const BOTTOM_BAR = 112;
+
+let probe: HTMLDivElement | null = null;
+/** The bottom safe-area inset in px (the home indicator), read through CSS env(). */
+export function safeBottom() {
+  if (!probe) {
+    probe = document.createElement("div");
+    probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;padding-bottom:env(safe-area-inset-bottom)";
+    document.body.appendChild(probe);
+  }
+  return parseFloat(getComputedStyle(probe).paddingBottom) || 0;
+}
+
+/**
+ * Where the camera's viewfinder and the editor's media go: the whole screen above the bottom bar.
+ * Camera photos are cropped to this shape, so the editor shows them in exactly the same spot.
+ */
+export function mediaArea(W = window.innerWidth, H = window.innerHeight): Rect {
+  return { x: 0, y: 0, w: W, h: Math.max(1, H - safeBottom() - BOTTOM_BAR) };
+}

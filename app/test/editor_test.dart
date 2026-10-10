@@ -28,7 +28,7 @@ void main() {
     await t.pumpWidget(
       MaterialApp(
         home: Preview(
-          capture: Capture(path!, 'photo', crop: viewAspect),
+          capture: Capture(path!, 'photo', crop: 0.6),
           targets: const [],
           preselect: const [],
           onSend: (_, _, _) {},
@@ -88,8 +88,8 @@ void main() {
       paintLabel(c, TextLabel(text: 'hey', style: s, color: Colors.purple, y: .5, scale: 2), const Size(390, 844), const Rect.fromLTWH(0, 100, 390, 650));
     }
     rec.endRecording();
-    expect(cropRect(const Size(3000, 4000), viewAspect).size, const Size(2400, 4000));
-    expect(cropRect(const Size(4000, 3000), viewAspect).size, const Size(4000, 2400));
+    expect(cropRect(const Size(3000, 4000), 0.6).size, const Size(2400, 4000));
+    expect(cropRect(const Size(4000, 3000), 0.6).size, const Size(4000, 2400));
     expect(spectrumAt(0), const Color(0xFFFFFFFF));
   });
 }

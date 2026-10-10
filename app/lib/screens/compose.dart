@@ -52,15 +52,19 @@ const maxSide = 4096;
 
 double labelSize(TextLabel l, double screenH) => fontSizes[l.style]! * screenH * (l.free ? l.scale : 1);
 
-/// The camera's viewfinder and photos are cropped to this (portrait width / height):
-/// a bit taller than the sensor's 3:4, so the picture fills more of the screen.
-const viewAspect = 3 / 5;
+/// Height of the bar under the picture (shutter on the camera, send on the editor), above the
+/// system's bottom inset.
+const bottomBar = 112.0;
 
-/// The centre part of `full` with the long side / short side ratio of `aspect`
-/// (portrait or landscape, following the media).
+/// Where the camera's viewfinder and the editor's media go: the whole screen above the bottom bar.
+/// Camera photos are cropped to this shape, so the editor shows them in exactly the same spot.
+Rect mediaArea(Size screen, double padBottom) => Rect.fromLTWH(0, 0, screen.width, (screen.height - padBottom - bottomBar).clamp(1, double.infinity));
+
+/// The centre part of `full` in the shape of `aspect` (width / height), turned to follow the
+/// media's orientation (a photo taken sideways is cropped sideways).
 Rect cropRect(Size full, double? aspect) {
   if (aspect == null || full.isEmpty) return Offset.zero & full;
-  final a = full.width > full.height ? 1 / aspect : aspect;
+  final a = (full.width > full.height) == (aspect > 1) ? aspect : 1 / aspect;
   final w = full.width / full.height > a ? full.height * a : full.width;
   final h = w / a;
   return Rect.fromLTWH((full.width - w) / 2, (full.height - h) / 2, w, h);
@@ -163,10 +167,10 @@ String videoMime(String path) {
 }
 
 /// Runs after the editor closed. `screen` is the editor's size, `dims` the media's as shown
-/// (upright, after the crop). Photos come out cropped to `cap.crop` and with the `look` filter.
-Future<Made> compose(Capture cap, Size dims, Size screen, List<Stroke> strokes, TextLabel? label, Look look) async {
+/// (upright, after the crop) and `r` where it was shown. Photos come out cropped to `cap.crop`
+/// and with the `look` filter.
+Future<Made> compose(Capture cap, Size dims, Size screen, Rect r, List<Stroke> strokes, TextLabel? label, Look look) async {
   final decorated = strokes.isNotEmpty || (label != null && label.text.trim().isNotEmpty);
-  final r = containRect(dims, screen);
 
   if (cap.kind == 'video') {
     final media = await File(cap.path).readAsBytes();
@@ -188,7 +192,7 @@ Future<Made> compose(Capture cap, Size dims, Size screen, List<Stroke> strokes, 
   final src = cropRect(Size(img.width.toDouble(), img.height.toDouble()), cap.crop);
   final fit = (maxSide / (src.width > src.height ? src.width : src.height)).clamp(0, 1).toDouble();
   final w = (src.width * fit).round(), h = (src.height * fit).round();
-  final png = await _render(w, h, screen, containRect(Size(w.toDouble(), h.toDouble()), screen), strokes, label, img, src, cap.mirror, look);
+  final png = await _render(w, h, screen, r, strokes, label, img, src, cap.mirror, look);
   final jpeg = await FlutterImageCompress.compressWithList(png, minWidth: 8192, minHeight: 8192, quality: 92, format: CompressFormat.jpeg, keepExif: false);
   return (media: jpeg, overlay: null, mime: 'image/jpeg');
 }

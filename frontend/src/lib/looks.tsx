@@ -79,12 +79,8 @@ export function luminance(hex: string) {
   return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
 }
 
-/** The camera's viewfinder and photos are cropped to this (portrait width / height). */
-export const VIEW_ASPECT = 3 / 5;
-
-/** The centre part of a w x h frame with the viewfinder's shape (portrait or landscape, following the frame). */
-export function cropRect(w: number, h: number, aspect = VIEW_ASPECT) {
-  const a = w > h ? 1 / aspect : aspect;
+/** The centre part of a w x h frame in the viewfinder's shape (`a` = width / height). */
+export function cropRect(w: number, h: number, a: number) {
   const cw = w / h > a ? h * a : w;
   const ch = cw / a;
   return { x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch };

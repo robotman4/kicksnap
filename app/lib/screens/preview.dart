@@ -88,7 +88,7 @@ class _PreviewState extends State<Preview> {
       return;
     }
     // start text in the lower part of the picture itself
-    final r = containRect(dims, screen);
+    final r = containRect(dims, mediaArea(screen, MediaQuery.paddingOf(context).bottom).size);
     label ??= TextLabel(color: ink, y: (r.top + r.height * .75) / screen.height);
     text.text = label!.text;
     setState(() => mode = 'text');
@@ -117,7 +117,8 @@ class _PreviewState extends State<Preview> {
     if (to.isEmpty || sending) return;
     sending = true;
     video?.pause();
-    final made = compose(widget.capture, dims, screen, List.of(strokes), label, look);
+    final r = containRect(dims, mediaArea(screen, MediaQuery.paddingOf(context).bottom).size);
+    final made = compose(widget.capture, dims, screen, r, List.of(strokes), label, look);
     Navigator.of(context).pop();
     widget.onSend(made, to, isVideo ? 0 : seconds);
   }
@@ -164,7 +165,8 @@ class _PreviewState extends State<Preview> {
       resizeToAvoidBottomInset: false,
       body: LayoutBuilder(builder: (context, box) {
         final screen = box.biggest;
-        final r = containRect(dims, screen);
+        // the media fills the space above the send bar, like the camera's viewfinder
+        final r = containRect(dims, mediaArea(screen, pad.bottom).size);
         return Stack(children: [
           Positioned.fill(child: _media(r)),
           // drawing layer
@@ -237,12 +239,12 @@ class _PreviewState extends State<Preview> {
               ],
             ]),
           ),
-          // the send bar: full width, under the photo (on short screens it sits on its bottom edge)
+          // the send bar: full width, in the bar under the photo
           if (mode == 'look')
             Positioned(
               left: 16,
               right: 16,
-              bottom: pad.bottom + 12,
+              bottom: pad.bottom + (bottomBar - 60) / 2,
               child: ValueListenableBuilder(
                 valueListenable: accent,
                 builder: (_, a, _) => Press(

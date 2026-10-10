@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Media } from "../components/Media";
 import { Sheet } from "../components/Sheet";
-import { buzz, containRect, onColor, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
+import { BOTTOM_BAR, buzz, containRect, mediaArea, onColor, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
 import { applyLook, hasVignette, LookDefs, lookCss, LOOKS, luminance, SPECTRUM, spectrumAt, vignetteCss } from "../lib/looks";
 import { useVisualViewport } from "../lib/viewport";
 import { Capture } from "./Camera";
@@ -100,7 +100,7 @@ const MAX_SIDE = 4096;
  * Bake drawing + text into what gets sent, at the media's own resolution.
  * Photos come out as one JPEG; videos keep their file and get a PNG layer the same size.
  */
-async function compose(capture: Capture, dims: { w: number; h: number }, strokes: Stroke[], label: Label | null, look: string) {
+async function compose(capture: Capture, dims: { w: number; h: number }, r: Rect, strokes: Stroke[], label: Label | null, look: string) {
   const decorated = strokes.length > 0 || !!label?.text.trim();
   // Photos always get re-encoded: that also strips EXIF (GPS etc.) from gallery picks.
   if (capture.kind === "video" && !decorated) return { file: capture.blob, overlay: null };
@@ -123,7 +123,6 @@ async function compose(capture: Capture, dims: { w: number; h: number }, strokes
   // screen px -> image px, through the rect the media is shown in
   const sw = window.innerWidth;
   const sh = window.innerHeight;
-  const r = containRect(dims.w, dims.h, sw, sh);
   const k = W / r.w;
   ctx.setTransform(k, 0, 0, k, -r.x * k, -r.y * k);
   drawStrokes(ctx, strokes, sw, sh);
@@ -164,7 +163,9 @@ export function Preview({
   const [to, setTo] = useState<string[]>(preselect);
   const [sending, setSending] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
-  const rect = containRect(dims.w, dims.h);
+  // the media fills the space above the send bar, like the camera's viewfinder
+  const area = mediaArea();
+  const rect = containRect(dims.w, dims.h, area.w, area.h);
   const vv = useVisualViewport();
   const typing = mode === "text";
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -286,11 +287,11 @@ export function Preview({
   const send = (recipients = to) => {
     if (!recipients.length || sending) return;
     setSending(true);
-    onSend(() => compose(capture, dims, strokes, label, look), recipients, seconds);
+    onSend(() => compose(capture, dims, rect, strokes, label, look), recipients, seconds);
   };
 
   const save = async () => {
-    const { file, overlay } = await compose(capture, dims, strokes, label, look);
+    const { file, overlay } = await compose(capture, dims, rect, strokes, label, look);
     for (const [blob, ext] of [[file, capture.kind === "video" ? "webm" : "jpg"], [overlay, "png"]] as const) {
       if (!blob) continue;
       const a = document.createElement("a");
@@ -438,8 +439,8 @@ export function Preview({
       </div>
 
       {mode === "look" && (
-        // the send bar: full width, under the photo (on short screens it sits on its bottom edge)
-        <div className="absolute inset-x-0 bottom-0 px-4 pb-[max(env(safe-area-inset-bottom),12px)]">
+        // the send bar: full width, in the bar under the photo
+        <div className="absolute inset-x-0 bottom-0 px-4" style={{ paddingBottom: `calc(env(safe-area-inset-bottom) + ${(BOTTOM_BAR - 60) / 2}px)` }}>
           <button
             onClick={() => (preselect.length ? send(preselect) : setPicking(true))}
             disabled={sending}
