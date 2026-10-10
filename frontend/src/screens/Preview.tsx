@@ -1,4 +1,4 @@
-import { Check, Download, Pencil, Send, Sparkles, Timer, Type, Undo2, X } from "lucide-react";
+import { Check, Download, Pencil, Plus, Send, Sparkles, Timer, Type, Undo2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Media } from "../components/Media";
@@ -553,7 +553,7 @@ function Round({ children, onClick, label, on, tint }: { children: React.ReactNo
   );
 }
 
-/** The ink swatches, plus a rainbow one that swaps them for a bar to pick any colour from. */
+/** The ink swatches, under a rainbow "+" one that swaps them for a bar to pick any colour from. */
 function Palette({ color, onPick }: { color: string; onPick: (c: string) => void }) {
   const [custom, setCustom] = useState(false);
   const [at, setAt] = useState(0.5);
@@ -567,6 +567,15 @@ function Palette({ color, onPick }: { color: string; onPick: (c: string) => void
   };
   return (
     <div className="mt-1 flex flex-col items-center gap-1.5 rounded-full bg-black/30 p-1.5 backdrop-blur" onMouseDown={(e) => e.preventDefault()}>
+      {/* first, so it's easy to find: the rainbow "+" opens the colour bar */}
+      <button
+        onClick={() => (buzz(4), setCustom(!custom))}
+        aria-label="custom colour"
+        className={`grid h-[30px] w-[30px] place-items-center rounded-full border-[3px] transition ease-spring ${mine || custom ? "border-white" : "border-white/30"} ${mine && !custom ? "scale-125" : ""}`}
+        style={{ background: mine && !custom ? color : "conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)" }}
+      >
+        {custom ? <X size={14} strokeWidth={4} /> : !mine && <Plus size={18} strokeWidth={4} className="text-white drop-shadow" />}
+      </button>
       {!custom &&
         INKS.map((c) => (
           <button
@@ -596,14 +605,6 @@ function Palette({ color, onPick }: { color: string; onPick: (c: string) => void
           {sliding && <div className="absolute right-11 h-[52px] w-[52px] rounded-full border-[3px] border-white" style={{ top: at * BAR - 26, background: color }} />}
         </div>
       )}
-      <button
-        onClick={() => (buzz(4), setCustom(!custom))}
-        aria-label="custom colour"
-        className={`grid h-[30px] w-[30px] place-items-center rounded-full border-[3px] transition ease-spring ${mine || custom ? "border-white" : "border-white/30"} ${mine && !custom ? "scale-125" : ""}`}
-        style={{ background: mine && !custom ? color : "conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)" }}
-      >
-        {custom && <X size={14} strokeWidth={4} />}
-      </button>
     </div>
   );
 }
