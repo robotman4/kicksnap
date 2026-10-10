@@ -48,9 +48,10 @@ Future<Bytes> sha256(List<int> data) async => Uint8List.fromList((await Sha256()
 
 Future<String> shaB64(List<int> data) async => b64(await sha256(data));
 
-/// HKDF-SHA256, 32 bytes. An empty salt is HKDF's default (HMAC pads the key with zeros).
+/// HKDF-SHA256, 32 bytes. An empty salt is HKDF's default: 32 zero bytes (same result, since HMAC pads
+/// the key with zeros). Spelled out because Android's native HMAC (javax.crypto) rejects an empty key.
 Future<Bytes> hkdf(List<int> ikm, List<int> salt, String info) async {
-  final k = await _hkdf.deriveKey(secretKey: SecretKey(ikm), nonce: salt, info: utf8Bytes(info));
+  final k = await _hkdf.deriveKey(secretKey: SecretKey(ikm), nonce: salt.isEmpty ? Uint8List(32) : salt, info: utf8Bytes(info));
   return Uint8List.fromList(await k.extractBytes());
 }
 
