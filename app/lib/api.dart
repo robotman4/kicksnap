@@ -137,20 +137,19 @@ class Api {
     await Store.setToken(t);
   }
 
-  // Passkeys: the server checks the origin a passkey signed for, so these send this server's address as
-  // Origin the way a browser would (the signature itself carries the app's own origin).
-  Map<String, String> get _origin => {'Origin': Uri.parse(server).origin};
+  // Passkeys: no Origin header, so the server expects the app's own (Android-signed) origin in the
+  // passkey's client data instead of the web app's.
 
   Future<({String id, String options})> passkeyBegin(String what) async {
-    final r = await _send('POST', '/passkeys/$what/begin', body: const {}, headers: _origin) as Json;
+    final r = await _send('POST', '/passkeys/$what/begin', body: const {}) as Json;
     return (id: r['challenge_id'] as String, options: r['options'] as String);
   }
 
   Future<void> passkeyRegisterFinish(String id, Object credential) =>
-      _send('POST', '/passkeys/register/finish', body: {'challenge_id': id, 'credential': credential}, headers: _origin);
+      _send('POST', '/passkeys/register/finish', body: {'challenge_id': id, 'credential': credential});
 
   Future<User> passkeyLoginFinish(String id, Object credential) async {
-    final r = await _send('POST', '/passkeys/login/finish', body: {'challenge_id': id, 'credential': credential}, headers: _origin, wantToken: true) as Json;
+    final r = await _send('POST', '/passkeys/login/finish', body: {'challenge_id': id, 'credential': credential}, wantToken: true) as Json;
     await _keepToken(r);
     return User.fromJson(r);
   }

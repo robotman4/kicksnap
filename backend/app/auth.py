@@ -306,16 +306,25 @@ def android_origins() -> list[str]:
 
 
 def _rp(request: Request) -> tuple[str, list[str]]:
-    """RP ID and the origins a passkey may have signed for: our own web app (never one the request names)
-    and our Android app. The native app sends this server's address as Origin, like a browser would."""
-    origin = request.headers.get("origin") or ""
+    """RP ID and the origins a passkey may have signed for, never one the request names.
+
+    Browsers always send Origin: it has to be our own web app. The native app sends none; then only our
+    Android app's own origin is accepted, which nothing but an app signed with ANDROID_CERTS can produce
+    (Android puts it in the signed client data). That doesn't depend on how the proxy forwards the scheme."""
+    origin = request.headers.get("origin")
+    if origin is None:
+        host = urlparse("//" + request.headers.get("host", "")).hostname or ""
+        rp_id = os.getenv("RP_ID") or host
+        if not rp_id or (host != rp_id and not host.endswith("." + rp_id)):
+            raise HTTPException(400, "passkey failed: this address doesn't match RP_ID")
+        return rp_id, android_origins()
     if not own_origin(request, origin):
         raise HTTPException(400, "passkey failed: open Kiks on its own address")
     host = urlparse(origin).hostname or ""
     rp_id = os.getenv("RP_ID") or host
     if host != rp_id and not host.endswith("." + rp_id):
         raise HTTPException(400, "passkey failed: this address doesn't match RP_ID")
-    return rp_id, [origin, *android_origins()]
+    return rp_id, [origin]
 
 
 def _stash(challenge: bytes, user_id: int | None) -> str:

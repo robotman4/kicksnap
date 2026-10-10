@@ -195,11 +195,19 @@ def test_app_links_for_native_passkeys(client):
     assert links[0]["target"]["sha256_cert_fingerprints"] == [DEV_CERT]
     assert android_origins() == ["android:apk-key-hash:Xav49AzPnWi8MAIr09R6P3-0ZoXEhrmzQgZ1OswdFZ4"]
     assert client.get("/.well-known/apple-app-site-association").status_code == 404  # IOS_APP_IDS unset
+    from app.auth import _rp
+    from starlette.requests import Request
+    native = Request({"type": "http", "path": "/", "headers": [(b"host", b"kiks.example.com")]})
+    assert _rp(native) == ("kiks.example.com", android_origins())
+    web = Request({"type": "http", "path": "/", "scheme": "http", "server": ("testserver", 80),
+                   "headers": [(b"host", b"testserver"), (b"origin", b"http://testserver")]})
+    assert _rp(web) == ("testserver", ["http://testserver"])  # a browser can't present the app's origin
 
 
 def test_passkeys_only_for_our_own_origin(client):
     assert client.post("/api/v1/passkeys/login/begin", headers={"Origin": "https://evil.example"}).status_code == 400
-    assert client.post("/api/v1/passkeys/login/begin").status_code == 400  # no Origin: not a browser
+    # no Origin: the native app; only the Android app's own origin will verify (test_app_links...)
+    assert client.post("/api/v1/passkeys/login/begin").status_code == 200
     assert client.post("/api/v1/passkeys/login/begin", headers={"Origin": "http://testserver"}).status_code == 200
 
 

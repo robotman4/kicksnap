@@ -33,7 +33,7 @@ Camera-first ephemeral messaging. Self-hosted server, web PWA, native Flutter ap
   (CI writes it from `KIKS_KEYSTORE_*` secrets).
 - iOS: bundle id `com.getkiks.app`, iOS 15+. No Mac in the sandbox: CI's `ios` job is the only iOS compile check.
   Signing/TestFlight happen on Kim's Mac (steps in `app/README.md`).
-- Passkeys: Android via Credential Manager (`kiks/passkey` channel in `MainActivity.kt`, `lib/passkey.dart`). The
-  server accepts `android:apk-key-hash:` origins from `ANDROID_CERTS` and serves `/.well-known/assetlinks.json`.
+- Passkeys: Android via Credential Manager (`kiks/passkey` channel in `MainActivity.kt`, `lib/passkey.dart`). The app sends
+  no Origin; then the server only accepts `android:apk-key-hash:` origins from `ANDROID_CERTS` and serves `/.well-known/assetlinks.json`.
   iOS passkeys not done (needs the paid account + Associated Domains).
 - No push yet (needs Firebase/APNs, see `app/README.md`). Admin stays web-only.
