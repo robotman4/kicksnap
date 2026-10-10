@@ -436,7 +436,7 @@ class _PreviewState extends State<Preview> {
   }
 }
 
-/// The ink swatches, plus a rainbow one that swaps them for a bar to pick any colour from.
+/// The ink swatches, under a rainbow "+" one that swaps them for a bar to pick any colour from.
 class Palette extends StatefulWidget {
   const Palette({super.key, required this.color, required this.onPick});
   final Color color;
@@ -463,6 +463,31 @@ class _PaletteState extends State<Palette> {
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(99)),
       child: Column(children: [
+        // first, so it's easy to find: the rainbow "+" opens the colour bar
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Press(
+            onTap: () => setState(() => custom = !custom),
+            haptic: 4,
+            child: AnimatedScale(
+              scale: mine && !custom ? 1.25 : 1,
+              duration: const Duration(milliseconds: 150),
+              child: Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: mine || custom ? Colors.white : Colors.white30, width: 3),
+                  color: mine && !custom ? widget.color : null,
+                  gradient: mine && !custom ? null : const SweepGradient(colors: [Color(0xFFFF0000), Color(0xFFFFFF00), Color(0xFF00FF00), Color(0xFF00FFFF), Color(0xFF0000FF), Color(0xFFFF00FF), Color(0xFFFF0000)]),
+                ),
+                child: custom
+                    ? const Icon(Icons.close_rounded, size: 16, color: Colors.white)
+                    : (mine ? null : const Icon(Icons.add_rounded, size: 18, color: Colors.white, shadows: [Shadow(blurRadius: 3)])),
+              ),
+            ),
+          ),
+        ),
         if (!custom)
           for (final c in inks)
             Padding(
@@ -528,28 +553,6 @@ class _PaletteState extends State<Palette> {
               ),
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3),
-          child: Press(
-            onTap: () => setState(() => custom = !custom),
-            haptic: 4,
-            child: AnimatedScale(
-              scale: mine && !custom ? 1.25 : 1,
-              duration: const Duration(milliseconds: 150),
-              child: Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: mine || custom ? Colors.white : Colors.white30, width: 3),
-                  color: mine && !custom ? widget.color : null,
-                  gradient: mine && !custom ? null : const SweepGradient(colors: [Color(0xFFFF0000), Color(0xFFFFFF00), Color(0xFF00FF00), Color(0xFF00FFFF), Color(0xFF0000FF), Color(0xFFFF00FF), Color(0xFFFF0000)]),
-                ),
-                child: custom ? const Icon(Icons.close_rounded, size: 16, color: Colors.white) : null,
-              ),
-            ),
-          ),
-        ),
       ]),
     );
   }

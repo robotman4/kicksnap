@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
@@ -65,7 +66,6 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
   double zoom = 1, minZoom = 1, maxZoom = 1, pinchFrom = 1;
   double? wantZoom;
   bool zoomBusy = false;
-  bool showZoom = false;
   Timer? zoomTimer;
   DateTime pinchedAt = DateTime(0);
   Rect card = Rect.zero;
@@ -136,6 +136,7 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     holdTimer?.cancel();
     stopTimer?.cancel();
     zoomTimer?.cancel();
+    zoomLabel.dispose();
     ring.dispose();
     stop();
     super.dispose();
@@ -270,30 +271,31 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     widget.onCapture(Capture(f.path, video ? 'video' : 'photo', fromGallery: true));
   }
 
+  // Pinching used to rebuild the whole page (preview included) on every finger move and wait
+  // for each zoom call to finish before sending the next, which CameraX takes a few frames to
+  // answer: zoom moved in steps. Now only the little zoom label rebuilds, and the newest zoom
+  // goes to the camera once per frame without waiting (CameraX drops the ones it overtakes).
+  final zoomLabel = ValueNotifier<double?>(null);
+
   void pinch(double scale) {
     if (cam == null || maxZoom <= minZoom) return;
     pinchedAt = DateTime.now();
     final z = (pinchFrom * scale).clamp(minZoom, maxZoom).toDouble();
-    if ((z - zoom).abs() < .01) return;
+    if ((z - zoom).abs() < .005) return;
+    zoom = z;
+    zoomLabel.value = z / minZoom;
     zoomTimer?.cancel();
-    setState(() {
-      zoom = z;
-      showZoom = true;
-    });
-    zoomTimer = Timer(const Duration(milliseconds: 900), () => mounted ? setState(() => showZoom = false) : null);
+    zoomTimer = Timer(const Duration(milliseconds: 900), () => zoomLabel.value = null);
     wantZoom = z;
-    if (!zoomBusy) pushZoom();
-  }
-
-  /// One zoom call at a time: the plugin is async and a pinch fires many updates.
-  Future<void> pushZoom() async {
-    final c = cam, z = wantZoom;
-    if (c == null || z == null) return;
-    wantZoom = null;
+    if (zoomBusy) return;
     zoomBusy = true;
-    await c.setZoomLevel(z).catchError((_) {});
-    zoomBusy = false;
-    if (wantZoom != null && mounted) pushZoom();
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      zoomBusy = false;
+      final c = cam, w = wantZoom;
+      wantZoom = null;
+      if (c != null && w != null && mounted) c.setZoomLevel(w).catchError((_) {});
+    });
+    SchedulerBinding.instance.scheduleFrame();
   }
 
   /// Why the server would turn this down, or null: said here, before it's encrypted and sent.
@@ -372,13 +374,16 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
             top: card.bottom - 52,
             child: IgnorePointer(
               child: Center(
-                child: AnimatedOpacity(
-                  opacity: showZoom ? 1 : 0,
-                  duration: const Duration(milliseconds: 200),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(99)),
-                    child: Text('${(zoom / minZoom).toStringAsFixed(1)}×', style: font(16, weight: FontWeight.w900)),
+                child: ValueListenableBuilder(
+                  valueListenable: zoomLabel,
+                  builder: (_, z, _) => AnimatedOpacity(
+                    opacity: z != null ? 1 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(99)),
+                      child: Text('${(z ?? zoom / minZoom).toStringAsFixed(1)}×', style: font(16, weight: FontWeight.w900)),
+                    ),
                   ),
                 ),
               ),

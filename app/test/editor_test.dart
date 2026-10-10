@@ -76,10 +76,11 @@ void main() {
     await t.pumpAndSettle();
     final p = find.byType(Palette);
     final br = t.getRect(p);
-    await t.tapAt(br.bottomCenter - const Offset(0, 20));
+    await t.tapAt(br.topCenter + const Offset(0, 20));
     await t.pumpAndSettle();
-    await t.dragFrom(br.topCenter + const Offset(0, 40), const Offset(0, 120));
+    await t.dragFrom(br.topCenter + const Offset(0, 120), const Offset(0, 120));
     await t.pumpAndSettle();
+    expect(inks.contains(t.widget<Palette>(find.byType(Palette)).color), isFalse);
     expect(t.takeException(), isNull);
     // paint each style
     final rec = ui.PictureRecorder();
