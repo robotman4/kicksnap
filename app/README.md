@@ -15,8 +15,11 @@ Every push to `main` that touches `app/`, `backend/` or the E2E spec builds a re
   open it and allow installs from the browser when Android asks. Newer builds install over older ones.
 - **Any run:** Actions → android → the run → artifact `kiks-android-<n>` (a zip with the APK).
 
-First start asks for your server (`kiks.example.com`). Set the repo variable `KIKS_SERVER`
-(Settings → Secrets and variables → Actions → Variables) to bake a default in.
+The app starts on the public server `https://snap.getkiks.com`. People on a self-hosted server tap the server
+name at the top of the welcome screen and type theirs (it's checked against `/api/v1/health`). Once signed in,
+switching servers means signing out first (your face → sign out). To ship a build with a different default, set
+the repo variable `KIKS_SERVER` (Settings → Secrets and variables → Actions → Variables), e.g.
+`https://kiks.example.com`.
 
 Sign in: "I've got an account" shows a QR. On a device that's already signed in (web or app): tap your face →
 add a device → scan it. That also moves your encryption keys, so the new phone can open snaps right away.

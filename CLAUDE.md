@@ -27,6 +27,8 @@ Camera-first ephemeral messaging. Self-hosted server, web PWA, native Flutter ap
 - Flutter 3.47.7. The Android SDK can't be downloaded in the cloud sandbox (dl.google.com blocked), so only
   `flutter analyze` and `flutter test` run locally; the APK is built by the `android` workflow.
 - Interop test: run the backend on :8765 and `KIKS_TEST_SERVER=http://127.0.0.1:8765 flutter test`.
+- Default server `https://snap.getkiks.com` (`Store.defaultServer`, overridable with `--dart-define=KIKS_SERVER`).
+  Users switch on the welcome screen's server pill; signed-in users sign out first.
 - Signing: `android/app/kiks-dev.keystore` (public, test builds only) unless `android/key.properties` exists
   (CI writes it from `KIKS_KEYSTORE_*` secrets).
 - iOS: bundle id `com.getkiks.app`, iOS 15+. No Mac in the sandbox: CI's `ios` job is the only iOS compile check.

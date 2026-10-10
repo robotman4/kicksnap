@@ -61,7 +61,7 @@ jobs:
           echo "$KEYSTORE_B64" | base64 -d > android/release.jks
           printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
 
-      # KIKS_SERVER (repo variable, e.g. https://kiks.example.com) pre-fills the server on first start
+      # KIKS_SERVER (repo variable, e.g. https://kiks.example.com) replaces the default https://snap.getkiks.com
       - run: >
           flutter build apk --release
           --build-number=${{ github.run_number }}

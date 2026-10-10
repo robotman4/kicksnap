@@ -49,7 +49,11 @@ class Store {
 
   // --- preferences --------------------------------------------------------------------
 
-  static String get server => _prefs.getString('server') ?? const String.fromEnvironment('KIKS_SERVER');
+  /// The public Kiks server. A build can point elsewhere with `--dart-define=KIKS_SERVER=https://...`;
+  /// people on a self-hosted server change it on the welcome screen.
+  static const defaultServer = String.fromEnvironment('KIKS_SERVER') == '' ? 'https://snap.getkiks.com' : String.fromEnvironment('KIKS_SERVER');
+
+  static String get server => _prefs.getString('server') ?? defaultServer;
   static Future<void> setServer(String s) => _prefs.setString('server', s);
 
   static String pref(String key, String fallback) => _prefs.getString('pref.$key') ?? fallback;

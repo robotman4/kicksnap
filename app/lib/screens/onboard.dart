@@ -11,7 +11,7 @@ import '../ui.dart';
 import 'terms.dart';
 
 /// First thing a new device sees. Two giant buttons, no passwords anywhere.
-/// The app is self-hosted, so it first asks which server (unless the build has one baked in).
+/// Starts on the public server; the server pill at the top switches to a self-hosted one.
 class Welcome extends StatefulWidget {
   const Welcome({super.key, required this.onIn});
   final void Function(User) onIn;
@@ -58,7 +58,7 @@ class _WelcomeState extends State<Welcome> {
       widget.onIn(await api.startFresh());
     } on ApiError catch (e) {
       setState(() {
-        error = e.status == 0 ? "can't reach the server" : e.message;
+        error = e.status == 0 ? "can't reach ${Uri.parse(api.server).host}. tap it at the top to pick another server." : e.message;
         busy = false;
       });
     }
@@ -80,6 +80,8 @@ class _WelcomeState extends State<Welcome> {
                   const Icon(Icons.dns_rounded, size: 16, color: Colors.white54),
                   const SizedBox(width: 6),
                   Text(Uri.parse(api.server).host, style: font(14, weight: FontWeight.w800, color: Colors.white54)),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.edit_rounded, size: 14, color: Colors.white38),
                 ]),
               ),
             ),
@@ -92,8 +94,22 @@ class _WelcomeState extends State<Welcome> {
         if (step == 'server') ...[
           Text("where's your\nKiks?", style: font(52, weight: FontWeight.w900, height: .95)),
           const SizedBox(height: 12),
-          Text('Kiks runs on servers people host themselves. Type the address of yours.',
+          Text('Use the public one, or type the address of a server you or your friends host.',
               style: font(17, weight: FontWeight.w700, color: Colors.white54)),
+          const SizedBox(height: 16),
+          if (api.server != Store.defaultServer)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Pill(
+                label: 'use ${Uri.parse(Store.defaultServer).host}',
+                onTap: busy
+                    ? null
+                    : () {
+                        serverField.text = Store.defaultServer.replaceFirst('https://', '');
+                        setServer();
+                      },
+              ),
+            ),
           const Spacer(),
           if (error.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(error, style: font(16, color: danger))),
           Row(children: [
