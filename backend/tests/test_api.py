@@ -185,3 +185,25 @@ def test_native_report_files_get_their_type_from_the_name(friends):
     a, b = friends()
     shot = ("screenshot0.jpg", JPEG, "application/octet-stream")
     assert a.post("/api/v1/reports", data={"username": b.name, "reason": "spam"}, files={"shots": shot}).status_code == 200
+
+
+def test_passkeys_only_for_our_own_origin(client):
+    assert client.post("/api/v1/passkeys/login/begin", headers={"Origin": "https://evil.example"}).status_code == 400
+    assert client.post("/api/v1/passkeys/login/begin").status_code == 400  # no Origin: not a browser
+    assert client.post("/api/v1/passkeys/login/begin", headers={"Origin": "http://testserver"}).status_code == 200
+
+
+def test_other_sites_cant_open_a_cookie_socket(new_user):
+    from starlette.websockets import WebSocketDisconnect
+
+    u = new_user()
+    u.c.cookies.set("ks_device", u.token)
+    try:
+        with pytest.raises(WebSocketDisconnect) as closed:
+            with u.c.websocket_connect("/api/v1/ws", headers={"Origin": "https://evil.example"}) as ws:
+                ws.receive_text()
+        assert closed.value.code == 4403
+        with u.c.websocket_connect("/api/v1/ws", headers={"Origin": "http://testserver"}):
+            pass
+    finally:
+        u.c.cookies.clear()

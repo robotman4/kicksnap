@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import __version__, db as store, errors
-from .api import API, Unversioned, device_token
+from .api import API, Unversioned, device_token, own_origin
 from .auth import current_user, public, router as auth_router, suspended, user_for_token
 from .limits import limit
 from .db import db
@@ -45,6 +45,24 @@ async def security_headers(request, call_next):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "same-origin")
+    if not request.url.path.startswith("/api/"):
+        # the web app: its own scripts only. E2E keys live in this origin's IndexedDB, so this is
+        # what keeps a slip elsewhere from turning into key theft.
+        host = re.sub(r"[^A-Za-z0-9.:\[\]-]", "", request.headers.get("host", ""))
+        response.headers.setdefault("Content-Security-Policy", "; ".join([
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob:",
+            "media-src 'self' blob:",
+            f"connect-src 'self' wss://{host} ws://{host}",
+            "worker-src 'self'",
+            "manifest-src 'self'",
+            "object-src 'none'",
+            "base-uri 'none'",
+            "form-action 'self'",
+            "frame-ancestors 'none'",
+        ]))
     return response
 
 
@@ -77,6 +95,10 @@ def update_me(body: Profile, user=Depends(current_user)):
 
 @app.websocket(API + "/ws")
 async def socket(ws: WebSocket):
+    # a browser socket rides on the cookie, so only our own pages may open one (native apps send a bearer token)
+    if not ws.headers.get("authorization") and ws.headers.get("origin") and not own_origin(ws, ws.headers["origin"]):
+        await ws.close(code=4403)
+        return
     user = user_for_token(device_token(ws))
     if not user or not user["username"] or suspended(user):
         await ws.close(code=4401)

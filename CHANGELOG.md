@@ -9,6 +9,11 @@ Versions follow [semver](https://semver.org). Release images: `ghcr.io/robotman4
   Rate limits no longer reset when a request brings a made-up bearer token. A passkey can't overwrite another
   account's. Signing out or removing a device closes its live connection right away. Pages can't be framed.
   Reports from the Android app with a snap or screenshots attached work now (they were refused as "not images").
+- **More hardening.** The web app has a Content-Security-Policy. Passkeys and the live connection only accept the
+  server's own origin (set `ORIGIN` if your proxy rewrites `Host`). If a friend you'd **verified** gets a new key,
+  their snaps and chats stay locked until you tap ok or scan their code again. A snap or text delivered twice is
+  refused. Resetting your keys sends a notification to your other devices. Link polling sends its secret in a
+  header, not the URL. The app only allows plain http for servers on your own network.
 
 - **Android app** (Flutter, [app/](app/README.md)). Camera-first like the web app: snaps, chats, groups,
   block/report, sign-in by QR from another device. Interoperates with the web app's E2E encryption; CI checks it

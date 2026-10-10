@@ -16,7 +16,7 @@ export type Message = {
   e2e?: boolean;
   key?: string | null;
   /** couldn't be opened here: "nokey" = sent before this device was set up */
-  locked?: "nokey" | "bad";
+  locked?: "nokey" | "bad" | "changed";
   /** what a report needs to prove the sender signed it */
   proof?: { sent_at: number; nonce: string; sig: string };
 };
@@ -104,7 +104,8 @@ export const api = {
 
   linkStart: (link_key?: string) => post<{ code: string; secret: string; expires_in: number }>("/api/v1/link/start", { link_key }),
   linkPoll: (code: string, secret: string) =>
-    call<{ approved: boolean; user?: User; key_blob?: string | null }>(`/api/v1/link/${code}?secret=${encodeURIComponent(secret)}`),
+    // the poll secret goes in a header, so it stays out of proxy access logs
+    call<{ approved: boolean; user?: User; key_blob?: string | null }>(`/api/v1/link/${code}`, { headers: { "X-Kiks-Secret": secret } }),
   linkKey: (code: string) => call<{ link_key: string | null }>(`/api/v1/link/${encodeURIComponent(code)}/key`),
   linkApprove: (code: string, key_blob?: string) => post(`/api/v1/link/${encodeURIComponent(code)}/approve`, { key_blob }),
 
@@ -119,7 +120,7 @@ export const api = {
     requestInfo: (code: string) => call<{ link_key: string }>(`/api/v1/keys/requests/${encodeURIComponent(code)}`),
     approve: (code: string, key_blob: string) => post(`/api/v1/keys/requests/${encodeURIComponent(code)}/approve`, { key_blob }),
     poll: (code: string, secret: string) =>
-      call<{ key_blob: string | null }>(`/api/v1/keys/requests/${encodeURIComponent(code)}/poll?secret=${encodeURIComponent(secret)}`),
+      call<{ key_blob: string | null }>(`/api/v1/keys/requests/${encodeURIComponent(code)}/poll`, { headers: { "X-Kiks-Secret": secret } }),
   },
   devices: () => call<{ devices: Device[]; passkeys: number }>("/api/v1/devices"),
   removeDevice: (id: number) => call(`/api/v1/devices/${id}`, { method: "DELETE" }),

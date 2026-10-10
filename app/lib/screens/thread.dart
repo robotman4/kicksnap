@@ -248,7 +248,10 @@ class _ThreadState extends State<Thread> {
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Text("🔑 @$who's key changed", style: font(17, weight: FontWeight.w900)),
                         const SizedBox(height: 4),
-                        Text("They probably got a new phone or reset Kiks. If you weren't expecting that, scan their code in person to check it's them.",
+                        Text(
+                            them!.held
+                                ? "You'd verified them, so their snaps and chats stay hidden until you tap ok. Best to scan their code in person first."
+                                : "They probably got a new phone or reset Kiks. If you weren't expecting that, scan their code in person to check it's them.",
                             style: font(14, weight: FontWeight.w600, color: Colors.white60)),
                         const SizedBox(height: 10),
                         Pill(label: 'ok', color: Colors.white, textColor: Colors.black, pad: 8, size: 16, onTap: () => e2e.acknowledge(who)),
@@ -313,7 +316,7 @@ class _ThreadState extends State<Thread> {
               ? Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   decoration: BoxDecoration(border: Border.all(color: Colors.white24, width: 2), borderRadius: BorderRadius.circular(24)),
-                  child: Text('🔒 ${m.locked == 'nokey' ? 'sent before this device was set up' : "couldn't be verified"}',
+                  child: Text('🔒 ${m.locked == 'nokey' ? 'sent before this device was set up' : m.locked == 'changed' ? 'hidden: their key changed' : "couldn't be verified"}',
                       style: font(14, weight: FontWeight.w700, color: Colors.white38)),
                 )
               : GestureDetector(

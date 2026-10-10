@@ -15,7 +15,7 @@ export function Viewer({ chat, onDone, toast }: { chat: Chat; onDone: (replyTo?:
   const [proof, setProof] = useState<SnapProof | null>(null);
   // what the (decrypted) snap itself says; the server's copy is only a hint
   const [shown, setShown] = useState<{ kind: "photo" | "video"; seconds: number } | null>(null);
-  const [cant, setCant] = useState<"nokey" | "bad" | null>(null);
+  const [cant, setCant] = useState<"nokey" | "bad" | "changed" | null>(null);
   const [reporting, setReporting] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<string | null>(null);
@@ -90,11 +90,13 @@ export function Viewer({ chat, onDone, toast }: { chat: Chat; onDone: (replyTo?:
       {cant && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-10 text-center">
           <p className="text-5xl">🔒</p>
-          <p className="text-2xl font-black">{cant === "nokey" ? "can't open this one here" : "this snap didn't check out"}</p>
+          <p className="text-2xl font-black">{cant === "nokey" ? "can't open this one here" : cant === "changed" ? "their key changed" : "this snap didn't check out"}</p>
           <p className="text-white/60">
             {cant === "nokey"
               ? "It was sent before this device was set up. Open it on your other device."
-              : "It couldn't be decrypted or verified, so it isn't shown. Tap to skip."}
+              : cant === "changed"
+                ? "You'd verified them. Open your chat with them, check it's really them, tap ok, then open this again."
+                : "It couldn't be decrypted or verified, so it isn't shown. Tap to skip."}
           </p>
         </div>
       )}

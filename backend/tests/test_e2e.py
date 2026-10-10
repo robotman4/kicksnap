@@ -21,7 +21,7 @@ def link(client, existing: Client) -> Client:
     blob = seal(l_pub, existing.ik, "link")
     r = existing.user.post(f"/api/v1/link/kiks-link:{start['code']}/approve", json={"key_blob": b64(blob)})
     assert r.status_code == 200, r.text
-    r = client.get(f"/api/v1/link/{start['code']}?secret={start['secret']}", headers=AUTH).json()
+    r = client.get(f"/api/v1/link/{start['code']}", headers={**AUTH, "X-Kiks-Secret": start["secret"]}).json()
     assert r["approved"]
     ik = open_(l_priv, unb64(r["key_blob"]), "link")
     assert ed_pub(ik) == existing.ik_pub
@@ -244,3 +244,20 @@ def test_vectors_file_matches_reference():
     for case in v["text"]:
         assert text_text(case["envelope"], case["to"]) == case["signed_text"]
     assert sha(b"") == "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU"
+
+
+def test_resetting_keys_tells_your_other_devices(new_user, monkeypatch):
+    from app import keys
+
+    sent = []
+
+    async def fake_notify(user_id, payload, skip_device=None):
+        sent.append((payload["tag"], skip_device))
+
+    monkeypatch.setattr(keys, "notify", fake_notify)
+    c = Client(new_user())
+    c.setup()
+    assert sent == []  # the first identity is no news
+    c.ik = None
+    c.setup(new_identity=True)
+    assert sent == [("keys-reset", c.me()["device_id"])]

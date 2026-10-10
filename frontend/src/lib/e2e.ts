@@ -11,7 +11,8 @@ import * as c from "./crypto";
 
 type Bytes = c.Bytes;
 type Local = { account: string; dk: Bytes; dkPub: Bytes; ik?: Bytes; deviceId?: number };
-export type Contact = { ik: string; verified: boolean; changed: boolean; version: number };
+/** `held`: the key changed from one you'd verified; their snaps and texts stay locked until you tap ok or re-scan. */
+export type Contact = { ik: string; verified: boolean; changed: boolean; version: number; held?: boolean };
 
 // --- storage --------------------------------------------------------------------------
 
@@ -77,6 +78,26 @@ async function setContacts(contacts: Record<string, Contact>) {
   await save("contacts", contacts);
 }
 
+/** False while that friend's key change waits on you (see `held`). */
+const trusted = (username: string) => !state.contacts[username]?.held;
+
+// "<from> <conversation> <nonce>" -> [snap or text id, first seen]; another id with the same ones is a replay.
+// (One snap sent to two groups is two ids with one nonce, so the conversation is part of the key.)
+type Seen = Record<string, [string, number]>;
+const SEEN_DAYS = 7;
+let seenP: Promise<Seen> | null = null;
+
+async function fresh(from: string, to: string, nonce: string, id: string): Promise<boolean> {
+  const seen = await (seenP ??= load<Seen>("seen").then((v): Seen => v ?? {}, (): Seen => ({})));
+  const k = `${from} ${to} ${nonce}`;
+  if (seen[k]) return seen[k][0] === id;
+  const now = Date.now();
+  for (const [key, [, at]] of Object.entries(seen)) if (now - at > SEEN_DAYS * 86400_000) delete seen[key];
+  seen[k] = [id, now];
+  await save("seen", seen).catch(() => {});
+  return true;
+}
+
 // --- this device ------------------------------------------------------------------------
 
 let syncing: Promise<KeyState> | null = null;
@@ -95,6 +116,7 @@ async function sync(username: string): Promise<KeyState> {
   if (!local || local.account !== username) {
     // a different account on this browser: start clean
     await wipe();
+    seenP = null;
     const k = c.newX();
     local = { account: username, dk: k.priv, dkPub: k.pub };
     await save("local", local);
@@ -171,6 +193,7 @@ export async function leave() {
 
 export async function forget() {
   local = null;
+  seenP = null;
   await wipe().catch(() => {});
   set({ ready: false, locked: false, fingerprint: null, contacts: {} });
 }
@@ -273,12 +296,17 @@ export async function observe(username: string, ik: string | null | undefined) {
   if (!ik || !local || username === local.account) return;
   const known = state.contacts[username];
   if (known?.ik === ik) return;
-  await setContacts({ ...state.contacts, [username]: known ? { ik, verified: false, changed: true, version: 0 } : { ik, verified: false, changed: false, version: 0 } });
+  await setContacts({
+    ...state.contacts,
+    [username]: known
+      ? { ik, verified: false, changed: true, version: 0, held: known.verified || !!known.held }
+      : { ik, verified: false, changed: false, version: 0 },
+  });
 }
 
 export async function acknowledge(username: string) {
   const k = state.contacts[username];
-  if (k?.changed) await setContacts({ ...state.contacts, [username]: { ...k, changed: false } });
+  if (k?.changed || k?.held) await setContacts({ ...state.contacts, [username]: { ...k, changed: false, held: false } });
 }
 
 /** Their QR code carried this key: matches what we have = verified. */
@@ -303,6 +331,7 @@ async function targets(username: string, b: KeyBundle | undefined): Promise<Map<
     if (!c.equal(ik, c.edPub(local!.ik!))) return out;
   } else {
     await observe(username, b.identity_key);
+    if (!trusted(username)) return out; // a verified friend's key changed: nothing goes to the new key until you ok it
     const k = state.contacts[username];
     if (k && k.ik === b.identity_key) {
       if (parsed.version < k.version) return out; // an older list than we've already seen: refuse
@@ -382,7 +411,7 @@ export async function sealSnap(file: Blob, overlay: Blob | null, to: string[], s
 export type SnapProof = { snap_id: string; sent_at: number; nonce: string; kind: string; mime: string; seconds: number; overlay: string | null; sig: string };
 export type OpenedSnap =
   | { ok: true; media: Blob; overlay: Blob | null; kind: "photo" | "video"; seconds: number; proof: SnapProof | null }
-  | { ok: false; why: "nokey" | "bad" };
+  | { ok: false; why: "nokey" | "bad" | "changed" };
 
 /** Fetch, decrypt and check a snap. `chat` says which conversation it came in, for the signature. */
 export async function openSnap(snap: SnapMeta, chat: Chat): Promise<OpenedSnap> {
@@ -400,6 +429,8 @@ export async function openSnap(snap: SnapMeta, chat: Chat): Promise<OpenedSnap> 
     const to = chat.group ? chat.key : `u:${local!.account}`;
     if (env.type !== "snap" || env.from !== k.sender || !c.verify(c.unb64(env.ik), sig, c.snapText(env, to))) return { ok: false, why: "bad" };
     await observe(env.from, env.ik);
+    if (!trusted(env.from)) return { ok: false, why: "changed" };
+    if (!(await fresh(env.from, to, env.nonce, snap.id))) return { ok: false, why: "bad" }; // the same snap delivered again
     const media = await c.aeadOpen(await c.sym(ck, "media"), new Uint8Array(await (await api.media(snap.id)).arrayBuffer()));
     if ((await c.shaB64(media)) !== env.media) return { ok: false, why: "bad" };
     let overlay: Bytes | null = null;
@@ -442,13 +473,14 @@ export async function sealText(chatKey: string, body: string) {
   const keys: Record<string, string> = {};
   for (const [name, bundle] of Object.entries(b)) {
     const devs = await targets(name, bundle);
+    if (kind === "u" && name === ident && !trusted(ident)) throw new Error(`@${ident}'s key changed: check it's them, then tap ok`);
     if (kind === "u" && name === ident && !devs.size) throw new Error(`@${ident} needs to update Kiks before you can chat`);
     await wrapAll(ck, sig, devs, keys);
   }
   return { body: c.b64(await c.aeadSeal(await c.sym(ck, "envelope"), c.utf8(JSON.stringify(env)))), keys };
 }
 
-async function openText<T extends { body: string; e2e?: boolean; key?: string | null }>(m: T, from: string, to: string) {
+async function openText<T extends { id: number; body: string; e2e?: boolean; key?: string | null }>(m: T, from: string, to: string) {
   if (!m.e2e) return m;
   if (!m.key || !local) return { ...m, body: "", locked: "nokey" as const };
   try {
@@ -458,6 +490,8 @@ async function openText<T extends { body: string; e2e?: boolean; key?: string | 
     const env = JSON.parse(c.fromUtf8(await c.aeadOpen(await c.sym(ck, "envelope"), c.unb64(m.body)))) as c.TextEnvelope;
     if (env.type !== "text" || env.from !== from || !c.verify(c.unb64(env.ik), sig, await c.textText(env, to))) throw new Error();
     await observe(env.from, env.ik);
+    if (!trusted(env.from)) return { ...m, body: "", locked: "changed" as const };
+    if (!(await fresh(env.from, to, env.nonce, `t${m.id}`))) throw new Error(); // the same text delivered again
     return { ...m, body: env.body, proof: { sent_at: env.sent_at, nonce: env.nonce, sig: c.b64(sig) } };
   } catch {
     return { ...m, body: "", locked: "bad" as const };

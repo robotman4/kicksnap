@@ -58,6 +58,10 @@ turn notifications on again. Payloads only say who sent something, never the sna
   it (or types it) and approves. The new device's poll then gets its own cookie.
 - Passkeys are WebAuthn, discoverable credentials. The relying-party ID defaults to the request host; set `RP_ID`
   if you serve on several hostnames. Passkeys need HTTPS (or `localhost`).
+- Passkeys and the web app's live connection only accept the server's own origin: the host the request came in
+  on. If your reverse proxy rewrites the `Host` header, set `ORIGIN` to the public address
+  (`https://kiks.example.com`, comma-separated for several).
+- The web app is served with a Content-Security-Policy (own scripts only), `X-Frame-Options: DENY` and `nosniff`.
 - Signed-in devices are listed under your face → "signed in on". Remove any from there.
 - Accounts that never pick a name are deleted after a day.
 - Native apps and scripts use the same device secret as a bearer token instead of a cookie (see API below).

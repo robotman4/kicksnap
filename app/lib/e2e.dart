@@ -18,16 +18,19 @@ import 'store.dart';
 typedef Bytes = Uint8List;
 
 class Contact {
-  Contact(this.ik, {this.verified = false, this.changed = false, this.version = 0});
+  Contact(this.ik, {this.verified = false, this.changed = false, this.version = 0, this.held = false});
   final String ik;
   final bool verified, changed;
   final int version;
 
-  Json toJson() => {'ik': ik, 'verified': verified, 'changed': changed, 'version': version};
-  factory Contact.fromJson(Json j) =>
-      Contact(j['ik'] as String, verified: j['verified'] == true, changed: j['changed'] == true, version: (j['version'] as num?)?.toInt() ?? 0);
-  Contact copy({bool? verified, bool? changed, int? version}) =>
-      Contact(ik, verified: verified ?? this.verified, changed: changed ?? this.changed, version: version ?? this.version);
+  /// the key changed from one you'd verified: their snaps and texts stay locked until you tap ok or re-scan
+  final bool held;
+
+  Json toJson() => {'ik': ik, 'verified': verified, 'changed': changed, 'version': version, if (held) 'held': true};
+  factory Contact.fromJson(Json j) => Contact(j['ik'] as String,
+      verified: j['verified'] == true, changed: j['changed'] == true, version: (j['version'] as num?)?.toInt() ?? 0, held: j['held'] == true);
+  Contact copy({bool? verified, bool? changed, int? version, bool? held}) => Contact(ik,
+      verified: verified ?? this.verified, changed: changed ?? this.changed, version: version ?? this.version, held: held ?? this.held);
 }
 
 class KeyState {
@@ -87,6 +90,28 @@ Future<Map<String, Contact>> _loadContacts() async {
 Future<void> _wipe() async {
   await Store.writeJson('local', null);
   await Store.writeJson('contacts', null);
+  await Store.writeJson('seen', null);
+  _seen = null;
+}
+
+/// False while that friend's key change waits on you (see [Contact.held]).
+bool _trusted(String username) => keys.value.contacts[username]?.held != true;
+
+// "<from> <conversation> <nonce>" -> [snap or text id, first seen ms]; another id with the same ones is a replay.
+// (One snap sent to two groups is two ids with one nonce, so the conversation is part of the key.)
+const _seenDays = 7;
+Future<Json>? _seen;
+
+Future<bool> _fresh(String from, String to, String nonce, String id) async {
+  final seen = await (_seen ??= Store.readJson('seen').then((j) => j ?? <String, dynamic>{}));
+  final k = '$from $to $nonce';
+  final hit = seen[k];
+  if (hit is List) return hit[0] == id;
+  final now = DateTime.now().millisecondsSinceEpoch;
+  seen.removeWhere((_, v) => v is! List || now - (v[1] as num) > _seenDays * 86400000);
+  seen[k] = [id, now];
+  await Store.writeJson('seen', seen);
+  return true;
 }
 
 /// Tests only: another simulated device took over Store and api; reload from them.
@@ -94,6 +119,7 @@ Future<void> _wipe() async {
 Future<void> switchDevice() async {
   _local = _Local.fromJson(await Store.readJson('local'));
   _cache.clear();
+  _seen = null;
   keys.value = KeyState(contacts: await _loadContacts(), ready: _local?.ik != null);
 }
 
@@ -320,12 +346,15 @@ Future<void> observe(String username, String? ik) async {
   if (ik == null || local == null || username == local.account) return;
   final known = keys.value.contacts[username];
   if (known?.ik == ik) return;
-  await _setContacts({...keys.value.contacts, username: Contact(ik, changed: known != null)});
+  await _setContacts({
+    ...keys.value.contacts,
+    username: Contact(ik, changed: known != null, held: known != null && (known.verified || known.held)),
+  });
 }
 
 Future<void> acknowledge(String username) async {
   final k = keys.value.contacts[username];
-  if (k != null && k.changed) await _setContacts({...keys.value.contacts, username: k.copy(changed: false)});
+  if (k != null && (k.changed || k.held)) await _setContacts({...keys.value.contacts, username: k.copy(changed: false, held: false)});
 }
 
 /// Their QR code carried this key: matches what we have = verified.
@@ -355,6 +384,7 @@ Future<Map<int, Bytes>> _targets(String username, KeyBundle? b) async {
     if (!c.equal(ik, await c.edPub(local.ik!))) return out;
   } else {
     await observe(username, b.identityKey);
+    if (!_trusted(username)) return out; // a verified friend's key changed: nothing goes to the new key until you ok it
     final k = keys.value.contacts[username];
     if (k != null && k.ik == b.identityKey) {
       if (parsed.version < k.version) return out; // an older list than we've already seen: refuse
@@ -463,7 +493,7 @@ class OpenedSnap {
   /// what a report needs to prove the sender signed it
   final Map<String, dynamic>? proof;
 
-  /// "nokey" (sent before this device was set up) or "bad"
+  /// "nokey" (sent before this device was set up), "changed" (a verified friend's key changed) or "bad"
   final String? why;
   bool get ok => why == null;
 }
@@ -492,6 +522,8 @@ Future<OpenedSnap> openSnap(SnapMeta snap, Chat chat) async {
     final to = chat.group ? chat.key : 'u:${local.account}';
     if (env == null || env.from != k['sender'] || !await c.verify(c.unb64(env.ik), sig, c.snapText(env, to))) return OpenedSnap.fail('bad');
     await observe(env.from, env.ik);
+    if (!_trusted(env.from)) return OpenedSnap.fail('changed');
+    if (!await _fresh(env.from, to, env.nonce, snap.id)) return OpenedSnap.fail('bad'); // the same snap delivered again
     final media = await c.aeadOpen(await c.sym(ck, 'media'), await api.media(snap.id));
     if (await c.shaB64(media) != env.media) return OpenedSnap.fail('bad');
     Bytes? overlay;
@@ -529,14 +561,19 @@ Future<({String body, Map<String, String> keys})> sealText(String chatKey, Strin
   final wraps = <String, String>{};
   for (final e in b.entries) {
     final devs = await _targets(e.key, e.value);
+    if (kind == 'u' && e.key == ident && !_trusted(ident)) throw ApiError(0, "@$ident's key changed: check it's them, then tap ok");
     if (kind == 'u' && e.key == ident && devs.isEmpty) throw ApiError(0, '@$ident needs to update Kiks before you can chat');
     await _wrapAll(ck, sig, devs, wraps);
   }
   return (body: c.b64(await c.aeadSeal(await c.sym(ck, 'envelope'), c.utf8Bytes(jsonEncode(env.toJson())))), keys: wraps);
 }
 
-/// (body, proof) or throws.
-Future<(String, TextProof)> _openText(String body, String? key, String from, String to) async {
+class _Held implements Exception {
+  const _Held();
+}
+
+/// (body, proof) or throws ([_Held] when a verified friend's key changed).
+Future<(String, TextProof)> _openText(int id, String body, String? key, String from, String to) async {
   final local = _local!;
   final pt = await c.open(local.dk, c.unb64(key!), 'wrap');
   final ck = pt.sublist(0, 32);
@@ -544,6 +581,8 @@ Future<(String, TextProof)> _openText(String body, String? key, String from, Str
   final env = c.TextEnvelope.fromJson(jsonDecode(c.fromUtf8(await c.aeadOpen(await c.sym(ck, 'envelope'), c.unb64(body)))) as Json);
   if (env == null || env.from != from || !await c.verify(c.unb64(env.ik), sig, await c.textText(env, to))) throw const FormatException('bad');
   await observe(env.from, env.ik);
+  if (!_trusted(env.from)) throw const _Held();
+  if (!await _fresh(env.from, to, env.nonce, 't$id')) throw const FormatException('replayed'); // the same text delivered again
   return (env.body, TextProof(env.sentAt, env.nonce, c.b64(sig)));
 }
 
@@ -555,8 +594,10 @@ Future<List<Message>> openTexts(Chat chat, List<Message> messages) async {
     if (m.key == null || _local == null) return m.lock('nokey');
     final to = chat.group ? chat.key : (m.mine ? chat.key : 'u:${_local!.account}');
     try {
-      final (body, proof) = await _openText(m.body, m.key, m.from, to);
+      final (body, proof) = await _openText(m.id, m.body, m.key, m.from, to);
       return m.opened(body, proof);
+    } on _Held {
+      return m.lock('changed');
     } catch (_) {
       return m.lock('bad');
     }
@@ -574,7 +615,7 @@ Future<List<TheirText>> openTheirTexts(String from, List<TheirText> texts) async
     }
     if (t.key == null || _local == null) continue;
     try {
-      final (body, proof) = await _openText(t.body, t.key, from, t.to ?? '');
+      final (body, proof) = await _openText(t.id, t.body, t.key, from, t.to ?? '');
       out.add(t.opened(body, proof));
     } catch (_) {}
   }

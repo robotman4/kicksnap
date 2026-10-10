@@ -169,4 +169,26 @@ void main() {
     final me = await api.keysMe();
     expect(c.parseDeviceList(me.deviceList!.payload)!.devices, hasLength(2));
   }, skip: skip);
+
+  test("a verified friend's new key holds their texts until you ok it", () async {
+    await use(alice);
+    final ik = (await api.bundles([bob.name], []))[bob.name]!.identityKey!;
+    expect(await e2e.verifyContact(bob.name, ik), isTrue);
+
+    await use(bob);
+    await e2e.resetIdentity(bob.name);
+    final t = await e2e.sealText('u:${alice.name}', 'new phone who dis');
+    await api.say('u:${alice.name}', t.body, t.keys);
+
+    await use(alice);
+    final chat = Chat(key: 'u:${bob.name}', name: bob.name, color: '#fff', group: false);
+    var got = await e2e.openTexts(chat, (await api.messages(chat.key)).messages);
+    expect(got.last.locked, 'changed');
+    expect(e2e.keys.value.contacts[bob.name]!.held, isTrue);
+    await expectLater(e2e.sealText(chat.key, 'hi?'), throwsA(isA<ApiError>()));
+
+    await e2e.acknowledge(bob.name);
+    got = await e2e.openTexts(chat, (await api.messages(chat.key)).messages);
+    expect(got.last.body, 'new phone who dis');
+  }, skip: skip);
 }

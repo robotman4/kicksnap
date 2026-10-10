@@ -140,11 +140,13 @@ async def _send_one(endpoint: str, p256dh: str, auth: str, payload: dict) -> int
         return 0
 
 
-async def notify(user_id: int, payload: dict) -> None:
-    """Fire-and-forget push to every device of a user that subscribed, all at once."""
+async def notify(user_id: int, payload: dict, skip_device: int | None = None) -> None:
+    """Fire-and-forget push to every device of a user that subscribed (but `skip_device`), all at once."""
     try:
         with db() as conn:
-            subs = conn.execute("SELECT endpoint, p256dh, auth FROM push_subs WHERE user_id = ?", (user_id,)).fetchall()
+            subs = conn.execute(
+                "SELECT endpoint, p256dh, auth FROM push_subs WHERE user_id = ? AND device_id IS NOT ?", (user_id, skip_device)
+            ).fetchall()
         statuses = await asyncio.gather(*(_send_one(s["endpoint"], s["p256dh"], s["auth"], payload) for s in subs))
         gone = [s["endpoint"] for s, status in zip(subs, statuses) if status in (404, 410)]  # unsubscribed or expired
         if gone:

@@ -28,6 +28,7 @@ class _WelcomeState extends State<Welcome> {
   Future<void> setServer() async {
     final s = normalizeServer(serverField.text);
     if (s.isEmpty) return;
+    if (!cleartextOk(s)) return setState(() => error = 'use https (plain http only works on your own network)');
     setState(() {
       busy = true;
       error = '';

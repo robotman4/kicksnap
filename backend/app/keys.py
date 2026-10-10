@@ -5,6 +5,7 @@ The server only ever holds public keys and ciphertext. It checks signatures on d
 lists so a buggy client can't publish garbage, and on report proofs so admins can tell a
 real text from a made-up one, but clients never rely on the server for either.
 """
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -12,15 +13,16 @@ import secrets
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from .api import API
+from .api import API, poll_secret
 from .auth import LINK_TTL, current_user, now
 from .chat import are_friends, blocked, member_ids
 from .db import db
 from .hub import hub
 from .limits import limit
+from .push import notify
 
 router = APIRouter(prefix=f"{API}/keys")
 
@@ -121,6 +123,13 @@ async def set_identity(body: Identity, user=Depends(current_user)):
             "UPDATE users SET identity_key = ?, device_list = NULL, device_list_sig = NULL, device_list_version = 0 WHERE id = ?",
             (body.identity_key, user["id"]),
         )
+        label = conn.execute("SELECT label FROM devices WHERE id = ?", (user["device_id"],)).fetchone()["label"]
+    if user["identity_key"] and user["identity_key"] != body.identity_key:
+        # anyone signed in as you can do this (that's how you recover), so your other devices hear about it
+        asyncio.create_task(notify(user["id"], {
+            "title": "Kiks", "tag": "keys-reset",
+            "body": f"your keys were reset on {label if label != 'device' else 'another device'}. not you? remove it: tap your face → signed in on",
+        }, skip_device=user["device_id"]))
     await tell_peers(user["id"], user["username"])
     return {"ok": True}
 
@@ -240,9 +249,9 @@ def key_request_approve(code: str, body: KeyBlob, user=Depends(current_user)):
 
 
 @router.get("/requests/{code}/poll")
-def key_request_poll(code: str, secret: str, user=Depends(current_user)):
+def key_request_poll(code: str, request: Request, secret: str | None = None, user=Depends(current_user)):
     req = _mine(code, user)
-    if not secrets.compare_digest(req["secret"], secret):
+    if not secrets.compare_digest(req["secret"].encode(), poll_secret(request, secret).encode()):
         raise HTTPException(410, "expired")
     if req["key_blob"]:
         _requests.pop(code.upper(), None)

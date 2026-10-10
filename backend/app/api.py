@@ -7,6 +7,7 @@ Routes live under /api/v1. Plain /api/... (what older clients call) is rewritten
 A device proves itself with its secret, either as the ks_device cookie (the web app)
 or as `Authorization: Bearer <secret>` (native apps, scripts).
 """
+import os
 import re
 
 from starlette.requests import HTTPConnection
@@ -27,6 +28,27 @@ def device_token(request: HTTPConnection) -> str | None:
     if scheme.lower() == "bearer" and token.strip():
         return token.strip()
     return request.cookies.get(COOKIE)
+
+
+# The web app's own origin(s). Unset: whatever host the request came in on (behind a proxy that
+# keeps the Host header, that's right). Set it (comma-separated) when the proxy rewrites Host.
+ORIGINS = {o.strip().rstrip("/") for o in os.getenv("ORIGIN", "").split(",") if o.strip()}
+
+
+def own_origin(request: HTTPConnection, origin: str | None) -> bool:
+    """Is `origin` (a browser's Origin header) this server's web app?"""
+    if not origin:
+        return False
+    if ORIGINS:
+        return origin.rstrip("/") in ORIGINS
+    scheme = {"ws": "http", "wss": "https"}.get(request.url.scheme, request.url.scheme)
+    host = request.headers.get("host", "")
+    return origin.rstrip("/") == f"{scheme}://{host}"
+
+
+def poll_secret(request: HTTPConnection, secret: str | None) -> str:
+    """A link poll's secret: the X-Kiks-Secret header (kept out of access logs), or ?secret= from older clients."""
+    return request.headers.get("x-kiks-secret") or secret or ""
 
 
 def wants_token(request: HTTPConnection) -> bool:

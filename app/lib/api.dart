@@ -27,6 +27,18 @@ class Part {
   final List<int> bytes;
 }
 
+/// Plain http is only for a server on your own network: the device token would cross the internet in the clear.
+bool cleartextOk(String server) {
+  final u = Uri.tryParse(server);
+  if (u == null || u.scheme != 'http') return u?.scheme == 'https';
+  final h = u.host.toLowerCase();
+  if (h == 'localhost' || h.endsWith('.local') || h == '::1' || h == '10.0.2.2') return true;
+  final ip = h.split('.').map(int.tryParse).toList();
+  if (ip.length != 4 || ip.any((n) => n == null || n < 0 || n > 255)) return false;
+  final (a, b) = (ip[0]!, ip[1]!);
+  return a == 10 || a == 127 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168) || (a == 100 && b >= 64 && b <= 127);
+}
+
 /// "kiks.example.com" -> "https://kiks.example.com". Plain http only when typed out (LAN testing).
 String normalizeServer(String raw) {
   var s = raw.trim();
@@ -52,8 +64,11 @@ class Api {
         if (wantToken) 'X-Kiks-Auth': 'bearer',
       };
 
-  Future<dynamic> _send(String method, String path, {Object? body, Map<String, String>? query, bool wantToken = false, bool raw = false}) async {
-    final req = http.Request(method, _uri(path, query))..headers.addAll(_headers(json: body != null, wantToken: wantToken));
+  Future<dynamic> _send(String method, String path,
+      {Object? body, Map<String, String>? query, Map<String, String>? headers, bool wantToken = false, bool raw = false}) async {
+    final req = http.Request(method, _uri(path, query))
+      ..headers.addAll(_headers(json: body != null, wantToken: wantToken))
+      ..headers.addAll(headers ?? const {});
     if (body != null) req.body = jsonEncode(body);
     final http.StreamedResponse res;
     try {
@@ -138,7 +153,8 @@ class Api {
 
   /// The new device's poll. Once approved it carries the sign-in and the sealed identity key.
   Future<({bool approved, User? user, String? keyBlob})> linkPoll(String code, String secret) async {
-    final r = await _send('GET', '/link/$code', query: {'secret': secret}, wantToken: true) as Json;
+    // the poll secret goes in a header, so it stays out of proxy access logs
+    final r = await _send('GET', '/link/$code', headers: {'X-Kiks-Secret': secret}, wantToken: true) as Json;
     if (r['approved'] != true) return (approved: false, user: null, keyBlob: null);
     await _keepToken(r);
     return (approved: true, user: User.fromJson(r['user'] as Json), keyBlob: r['key_blob'] as String?);
@@ -167,7 +183,7 @@ class Api {
   Future<String> keyRequestInfo(String code) async => (await get('/keys/requests/${Uri.encodeComponent(code)}'))['link_key'] as String;
   Future<void> keyApprove(String code, String blob) => post('/keys/requests/${Uri.encodeComponent(code)}/approve', {'key_blob': blob});
   Future<String?> keyPoll(String code, String secret) async =>
-      (await get('/keys/requests/${Uri.encodeComponent(code)}/poll', {'secret': secret}))['key_blob'] as String?;
+      (await _send('GET', '/keys/requests/${Uri.encodeComponent(code)}/poll', headers: {'X-Kiks-Secret': secret}))['key_blob'] as String?;
 
   // --- devices, friends, blocks ---------------------------------------------------------
 

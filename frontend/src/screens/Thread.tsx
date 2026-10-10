@@ -120,7 +120,9 @@ export function Thread({
           <div className="mb-4 rounded-3xl bg-white/10 p-4">
             <p className="font-black">🔑 @{who}'s key changed</p>
             <p className="mt-1 text-sm text-white/60">
-              They probably got a new phone or reset Kiks. If you weren't expecting that, scan their code in person to check it's them.
+              {them.held
+                ? "You'd verified them, so their snaps and chats stay hidden until you tap ok. Best to scan their code in person first."
+                : "They probably got a new phone or reset Kiks. If you weren't expecting that, scan their code in person to check it's them."}
             </p>
             <button onClick={() => acknowledge(who)} className="mt-3 rounded-full bg-white px-5 py-2 font-black text-black active:scale-95">
               ok
@@ -139,7 +141,7 @@ export function Thread({
               )}
               {m.locked ? (
                 <p className="max-w-[80%] rounded-3xl border-2 border-dashed border-white/15 px-4 py-2.5 text-sm font-semibold text-white/40">
-                  🔒 {m.locked === "nokey" ? "sent before this device was set up" : "couldn't be verified"}
+                  🔒 {m.locked === "nokey" ? "sent before this device was set up" : m.locked === "changed" ? "hidden: their key changed" : "couldn't be verified"}
                 </p>
               ) : (
                 <p

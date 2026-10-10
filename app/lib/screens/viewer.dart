@@ -174,10 +174,14 @@ class _ViewerState extends State<Viewer> with SingleTickerProviderStateMixin {
                     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                       const Text('🔒', style: TextStyle(fontSize: 48)),
                       const SizedBox(height: 12),
-                      Text(cant == 'nokey' ? "can't open this one here" : "this snap didn't check out", textAlign: TextAlign.center, style: font(24, weight: FontWeight.w900)),
+                      Text(cant == 'nokey' ? "can't open this one here" : cant == 'changed' ? 'their key changed' : "this snap didn't check out", textAlign: TextAlign.center, style: font(24, weight: FontWeight.w900)),
                       const SizedBox(height: 8),
                       Text(
-                        cant == 'nokey' ? 'It was sent before this device was set up. Open it on your other device.' : "It couldn't be decrypted or verified, so it isn't shown. Tap to skip.",
+                        cant == 'nokey'
+                            ? 'It was sent before this device was set up. Open it on your other device.'
+                            : cant == 'changed'
+                                ? "You'd verified them. Open your chat with them, check it's really them, tap ok, then open this again."
+                                : "It couldn't be decrypted or verified, so it isn't shown. Tap to skip.",
                         textAlign: TextAlign.center,
                         style: font(16, weight: FontWeight.w600, color: Colors.white60),
                       ),

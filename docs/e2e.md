@@ -88,6 +88,10 @@ changed. That is the only way a device gets added: by a device that holds the id
   when it matches the server's; a mismatch warns.
 - Clients pin each contact's identity key on first sight (TOFU). When it changes, they show "key changed"
   (and drop "verified") but keep working, like Signal.
+- Except when the old key was **verified**: then the contact is *held*. Their snaps and texts show as locked
+  ("their key changed") and nothing is encrypted to the new key until the person taps ok on the notice or scans
+  the new code. Seals are anonymous, so without this a server could send "from" a verified friend under a key it
+  made up and the only sign would be the notice.
 
 ## Sending
 
@@ -165,6 +169,9 @@ and tells the sender ("hasn't updated yet"); group members like that just don't 
 4. Compare `envelope.ik` with the pinned key for that sender: pin on first sight, flag "key changed" otherwise.
 5. Snaps: decrypt media/overlay, check their SHA-256 against the envelope. Use `kind`, `mime` and `seconds` from the
    envelope, not from the server.
+6. Replays: remember `(from, to, nonce)` with the snap or text id for 7 days. The same triple under a different id
+   is the server delivering it again: treat it as a failure. (`to` is part of it because one snap sent to two
+   groups is two ids with one nonce.)
 
 Any failure: show it as unreadable, never as content.
 
@@ -178,7 +185,7 @@ New device N, signed-in device A:
 2. A scans the QR (so `L.pub` comes from N's screen, not from the server). If the code was typed instead, A fetches
    `L.pub` from `GET /link/<CODE>/key` and asks the person to compare the check number on both screens first.
 3. A calls `POST /link/<CODE>/approve {key_blob: b64(seal(L.pub, IK seed(32), "link"))}`.
-4. N's poll `GET /link/<CODE>?secret=…` returns its session plus `key_blob`. N opens it, checks the seed's public key
+4. N's poll `GET /link/<CODE>` (secret in `X-Kiks-Secret`) returns its session plus `key_blob`. N opens it, checks the seed's public key
    equals the account's `identity_key`, makes its DK, publishes it, adds itself to the signed device list.
 
 A device that is signed in but has no identity key (passkey sign-in, cleared storage, an account from before E2E
@@ -210,11 +217,11 @@ verifies the signature with the reported user's identity key. Admins see "signed
 | `POST /keys/requests` | `{link_key}` → `{code, secret}` |
 | `GET /keys/requests/<code>` | approver (same account) reads `{link_key}` |
 | `POST /keys/requests/<code>/approve` | `{key_blob}` |
-| `GET /keys/requests/<code>/poll?secret=` | `{key_blob \| null}` |
+| `GET /keys/requests/<code>/poll` | secret in the `X-Kiks-Secret` header (`?secret=` still works); `{key_blob \| null}` |
 | `POST /link/start` | optional `{link_key}` |
 | `GET /link/<code>/key` | `{link_key}` (signed-in approver, typed-code path) |
 | `POST /link/<code>/approve` | optional `{key_blob}` |
-| `GET /link/<code>?secret=` | adds `key_blob` |
+| `GET /link/<code>` | secret in the `X-Kiks-Secret` header (`?secret=` still works); adds `key_blob` |
 | `POST /snaps` | multipart: `file` (encrypted), `overlay` (encrypted, optional), `envelope`, `keys` = JSON `{"u": {device_id: wrap}, "g:<id>": {…}}`, `kind`, `seconds`, `to`, `groups` |
 | `GET /snaps/<id>/key` | `{envelope, key, sender, to}`; `key` null if this device has no wrap |
 | `GET /chats/<key>/messages` | each message adds `e2e`, `key` (`body` is the envelope when `e2e`) |

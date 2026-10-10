@@ -22,7 +22,7 @@ from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
 )
 
-from .api import API, COOKIE, device_token, wants_token
+from .api import API, COOKIE, device_token, own_origin, poll_secret, wants_token
 from .limits import limit
 from .db import db
 from .hub import hub
@@ -242,10 +242,10 @@ def link_start(body: LinkStart | None = None):
 
 
 @router.get("/link/{code}")
-def link_poll(code: str, secret: str, request: Request, response: Response):
+def link_poll(code: str, request: Request, response: Response, secret: str | None = None):
     _prune()
     link = _links.get(code.upper())
-    if not link or not secrets.compare_digest(link["secret"], secret):
+    if not link or not secrets.compare_digest(link["secret"].encode(), poll_secret(request, secret).encode()):
         raise HTTPException(410, "expired")
     if not link["user_id"]:
         return {"approved": False}
@@ -292,8 +292,14 @@ _challenges: dict[str, tuple[bytes, int, int | None]] = {}  # id -> (challenge, 
 
 
 def _rp(request: Request) -> tuple[str, str]:
-    origin = request.headers.get("origin") or f"{request.url.scheme}://{request.url.netloc}"
-    rp_id = os.getenv("RP_ID") or urlparse(origin).hostname
+    """RP ID and the origin the browser must have signed for: only our own, never one the request names."""
+    origin = request.headers.get("origin") or ""
+    if not own_origin(request, origin):
+        raise HTTPException(400, "passkey failed: open Kiks on its own address")
+    host = urlparse(origin).hostname or ""
+    rp_id = os.getenv("RP_ID") or host
+    if host != rp_id and not host.endswith("." + rp_id):
+        raise HTTPException(400, "passkey failed: this address doesn't match RP_ID")
     return rp_id, origin
 
 
