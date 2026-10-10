@@ -1,11 +1,11 @@
-import { Bell, BellOff, Check, Fingerprint, KeyRound, LogOut, ShieldCheck, QrCode, RefreshCw, Smartphone, Sparkles, Trash2, X } from "lucide-react";
+import { Bell, BellOff, Check, Plus, Fingerprint, KeyRound, LogOut, ShieldCheck, QrCode, RefreshCw, Smartphone, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Scanner } from "../components/Scanner";
 import { TermsLink } from "../components/Terms";
 import { Sheet } from "../components/Sheet";
 import { api, Device, Friend, User } from "../lib/api";
-import { ACCENTS, ago, buzz, onColor, timerLabel, TIMERS } from "../lib/feel";
+import { ACCENTS, ago, applyAccent, buzz, hueColor, onColor, timerLabel, TIMERS } from "../lib/feel";
 import { addPasskey, passkeysSupported } from "../lib/passkey";
 import { disablePush, enablePush, pushState, PushState } from "../lib/push";
 import { reloadApp, updateAvailable } from "../lib/update";
@@ -151,6 +151,7 @@ export function Settings({
 
           <Label>your colour</Label>
           <div className="flex flex-wrap gap-3">
+            <CustomAccent color={me.color} onColor={setColor} />
             {ACCENTS.map((c) => (
               <button
                 key={c}
@@ -298,5 +299,52 @@ function Tile({ children, icon, onClick, wide, on }: { children: React.ReactNode
       <span className={on ? "" : "text-accent"}>{icon}</span>
       {children}
     </button>
+  );
+}
+
+/**
+ * A rainbow "+" swatch that opens a hue bar: slide for any colour (shown live), let go to keep it.
+ * Same bar as hueAt in app/lib/screens/settings.dart.
+ */
+function CustomAccent({ color, onColor: save }: { color: string; onColor: (c: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [live, setLive] = useState<string | null>(null);
+  const mine = !ACCENTS.some((c) => c.toLowerCase() === color.toLowerCase());
+  const pick = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const c = hueColor((e.clientX - r.left) / r.width);
+    setLive(c);
+    applyAccent(c);
+    return c;
+  };
+  return (
+    <>
+      <button
+        onClick={() => (buzz(6), setOpen(!open))}
+        className="grid h-12 w-12 place-items-center rounded-full transition ease-spring active:scale-90"
+        style={{ background: mine ? color : "conic-gradient(#f55,#fd5,#5f5,#5ff,#55f,#f5f,#f55)", color: mine ? onColor(color) : "#fff" }}
+        aria-label="custom colour"
+      >
+        {mine ? <Check size={24} strokeWidth={3.5} /> : <Plus size={24} strokeWidth={3.5} className="drop-shadow" />}
+      </button>
+      {open && (
+        <div
+          className="relative order-last h-12 w-full touch-none rounded-full"
+          style={{ background: `linear-gradient(90deg, ${Array.from({ length: 13 }, (_, i) => hueColor(i / 12)).join(",")})` }}
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            pick(e);
+          }}
+          onPointerMove={(e) => live && pick(e)}
+          onPointerUp={(e) => {
+            save(pick(e));
+            setLive(null);
+            buzz(6);
+          }}
+        >
+          <p className="pointer-events-none absolute inset-0 grid place-items-center text-sm font-black text-black/60">slide to pick</p>
+        </div>
+      )}
+    </>
   );
 }

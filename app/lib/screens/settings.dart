@@ -25,6 +25,17 @@ class _SettingsState extends State<Settings> {
   int passkeys = 0;
   List<Friend> blocked = [];
   bool deleting = false;
+
+  /// the "your colour" hue bar is open
+  bool hues = false;
+
+  void setColour(String c) {
+    accent.value = hex(c);
+    model.me = me.copyWith(color: c);
+    model.onMe(model.me);
+    api.setColor(c).catchError((_) => me);
+    setState(() {});
+  }
   final confirmName = TextEditingController();
   int seconds = int.tryParse(Store.pref('seconds', '5')) ?? 5;
 
@@ -122,16 +133,30 @@ class _SettingsState extends State<Settings> {
             ),
           const Label('your colour'),
           Wrap(spacing: 12, runSpacing: 12, children: [
+            // a rainbow "+" opens a hue bar for any colour
+            Builder(builder: (_) {
+              final mine = !accents.any((c) => c.toLowerCase() == me.color.toLowerCase());
+              return Press(
+                haptic: 6,
+                onTap: () => setState(() => hues = !hues),
+                child: Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: mine ? hex(me.color) : null,
+                    gradient: mine ? null : SweepGradient(colors: [for (var i = 0; i <= 6; i++) hueAt(i / 6)]),
+                  ),
+                  child: mine
+                      ? Icon(Icons.check_rounded, size: 26, color: onColor(hex(me.color)))
+                      : const Icon(Icons.add_rounded, size: 28, color: Colors.white, shadows: [Shadow(blurRadius: 4)]),
+                ),
+              );
+            }),
             for (final c in accents)
               Press(
                 haptic: 6,
-                onTap: () {
-                  accent.value = hex(c);
-                  model.me = me.copyWith(color: c);
-                  model.onMe(model.me);
-                  api.setColor(c).catchError((_) => me);
-                  setState(() {});
-                },
+                onTap: () => setColour(c),
                 child: Container(
                   width: 48,
                   height: 48,
@@ -140,6 +165,27 @@ class _SettingsState extends State<Settings> {
                 ),
               ),
           ]),
+          if (hues)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: LayoutBuilder(builder: (context, box) {
+                String at(Offset p) => hexOf(hueAt(p.dx / box.maxWidth));
+                return GestureDetector(
+                  onHorizontalDragUpdate: (d) => accent.value = hex(at(d.localPosition)),
+                  onHorizontalDragEnd: (_) => setColour(hexOf(accent.value)),
+                  onTapUp: (d) => setColour(at(d.localPosition)),
+                  child: Container(
+                    height: 48,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(99),
+                      gradient: LinearGradient(colors: [for (var i = 0; i <= 12; i++) hueAt(i / 12)]),
+                    ),
+                    child: Text('slide to pick', style: font(14, weight: FontWeight.w900, color: Colors.black54)),
+                  ),
+                );
+              }),
+            ),
           const Label('photos show for'),
           Row(children: [
             for (final t in timers)
@@ -269,3 +315,9 @@ class _Tile extends StatelessWidget {
         ),
       );
 }
+
+/// A colour on the "your colour" hue bar (0..1): bright and a little soft, so it works as an
+/// accent. Same as hueColor in frontend/src/lib/feel.ts.
+Color hueAt(double t) => HSVColor.fromAHSV(1, t.clamp(0.0, 1.0) * 360 % 360, .75, 1).toColor();
+
+String hexOf(Color c) => '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';

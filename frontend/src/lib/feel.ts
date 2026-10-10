@@ -86,3 +86,14 @@ export function safeBottom() {
 export function mediaArea(W = window.innerWidth, H = window.innerHeight): Rect {
   return { x: 0, y: 0, w: W, h: Math.max(1, H - safeBottom() - BOTTOM_BAR) };
 }
+
+/** A colour on the "your colour" hue bar (0..1): bright and a little soft, so it works as an accent. */
+export function hueColor(t: number) {
+  const h = Math.min(1, Math.max(0, t)) * 6;
+  const f = (n: number) => {
+    const k = (n + h) % 6;
+    const v = 1 - 0.75 * Math.max(0, Math.min(k, 4 - k, 1));
+    return Math.round(v * 255);
+  };
+  return "#" + [f(5), f(3), f(1)].map((v) => v.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
