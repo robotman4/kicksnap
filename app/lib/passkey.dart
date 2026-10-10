@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 import 'api.dart';
 import 'models.dart';
@@ -28,9 +29,27 @@ Future<Object> _ask(String method, String options) async {
   } on PlatformException catch (e) {
     if (e.code == 'cancelled') throw PasskeyCancelled();
     if (e.code == 'none') throw ApiError(404, 'no passkey for this server on this phone');
-    throw ApiError(400, e.message ?? "passkey didn't work");
+    throw ApiError(400, await _whyNot() ?? e.message ?? "passkey didn't work");
   }
 }
+
+/// The usual reason Android refuses: the server doesn't (yet) say it trusts this app.
+Future<String?> _whyNot() async {
+  final host = Uri.parse(api.server).host;
+  try {
+    final r = await http.get(Uri.parse('${api.server}/.well-known/assetlinks.json')).timeout(const Duration(seconds: 8));
+    final links = r.statusCode == 200 ? jsonDecode(r.body) : null;
+    final ok = links is List && links.any((l) => l is Map && (l['target'] as Map?)?['package_name'] == appId);
+    if (!ok) return "$host doesn't list this app in /.well-known/assetlinks.json yet";
+  } on FormatException {
+    return '$host needs an update before passkeys work in the app (no /.well-known/assetlinks.json)';
+  } catch (_) {
+    return null; // can't tell
+  }
+  return null;
+}
+
+const appId = 'com.getkiks.app';
 
 Future<User> signInWithPasskey() async {
   final b = await api.passkeyBegin('login');
