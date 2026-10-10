@@ -22,7 +22,8 @@ type Label = { text: string; style: TextStyle; color: string; x: number; y: numb
 const free = (l: Label) => l.style !== "bar";
 
 const INKS = ["#FFFFFF", "#000000", "#FF3D5A", "#FF8A3D", "#FFE14D", "#C6FF3D", "#3DD9FF", "#7C5CFF", "#FF5CD6"];
-const BRUSH = 0.012; // of screen width
+// pen thickness, as a fraction of screen width (same in app/lib/screens/compose.dart)
+const BRUSH = { min: 0.005, max: 0.05, start: 0.012 };
 // font sizes as a fraction of screen height, shared by DOM preview and canvas output
 const FONT = { bar: 0.028, big: 0.065, pill: 0.045, soft: 0.055 };
 const WEIGHT = { bar: 600, big: 900, pill: 800, soft: 800 };
@@ -158,6 +159,7 @@ export function Preview({
   const [ink, setInk] = useState(INKS[5]);
   const [look, setLook] = useState("original");
   const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [brush, setBrush] = useState(() => Number(pref.get("brush", String(BRUSH.start))) || BRUSH.start);
   const [label, setLabel] = useState<Label | null>(null);
   const [picking, setPicking] = useState(false);
   const [to, setTo] = useState<string[]>(preselect);
@@ -198,7 +200,7 @@ export function Preview({
 
   const drawDown = (e: React.PointerEvent) => {
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    drawing.current = { color: ink, width: BRUSH, pts: [rel(e)] };
+    drawing.current = { color: ink, width: brush, pts: [rel(e)] };
     force((n) => n + 1);
   };
   const drawMove = (e: React.PointerEvent) => {
@@ -478,6 +480,14 @@ export function Preview({
         </div>
       )}
       {mode === "draw" && (
+        <BrushSize
+          value={brush}
+          color={ink}
+          onChange={setBrush}
+          onDone={(b) => pref.set("brush", String(b))}
+        />
+      )}
+      {mode === "draw" && (
         <div className="absolute inset-x-0 bottom-0 flex justify-center pb-[max(env(safe-area-inset-bottom),24px)]">
           <button onClick={() => setMode("look")} className="rounded-full bg-white px-8 py-4 text-xl font-black text-black active:scale-95">
             done
@@ -605,6 +615,48 @@ function Palette({ color, onPick }: { color: string; onPick: (c: string) => void
           {sliding && <div className="absolute right-11 h-[52px] w-[52px] rounded-full border-[3px] border-white" style={{ top: at * BAR - 26, background: color }} />}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Pen thickness: drag up for thicker, a dot in the pen's colour shows the size. */
+function BrushSize({ value, color, onChange, onDone }: { value: number; color: string; onChange: (b: number) => void; onDone: (b: number) => void }) {
+  const H = 220;
+  const [sliding, setSliding] = useState(false);
+  const t = (value - BRUSH.min) / (BRUSH.max - BRUSH.min);
+  const px = Math.max(10, value * window.innerWidth);
+  const slide = (e: React.PointerEvent<HTMLDivElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    const k = Math.min(1, Math.max(0, (box.bottom - e.clientY) / box.height));
+    onChange(BRUSH.min + k * (BRUSH.max - BRUSH.min));
+  };
+  const end = () => {
+    setSliding(false);
+    onDone(value);
+  };
+  return (
+    <div
+      className="absolute left-4 top-1/2 flex w-[36px] -translate-y-1/2 touch-none justify-center"
+      style={{ height: H }}
+      aria-label="pen size"
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setSliding(true);
+        slide(e);
+      }}
+      onPointerMove={(e) => sliding && slide(e)}
+      onPointerUp={end}
+      onPointerCancel={end}
+    >
+      <svg width="24" height={H} className="drop-shadow">
+        <polygon points={`2,0 22,0 14,${H} 10,${H}`} fill="rgba(255,255,255,.45)" stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
+      </svg>
+      <div
+        className="absolute left-1/2 rounded-full border-[3px] border-white shadow"
+        style={{ width: px + 6, height: px + 6, top: (1 - t) * H, transform: "translate(-50%, -50%)", background: color }}
+      />
+      {sliding && <div className="absolute left-14 rounded-full border-2 border-white/60" style={{ width: value * window.innerWidth, height: value * window.innerWidth, top: (1 - t) * H, transform: "translateY(-50%)", background: color }} />}
     </div>
   );
 }

@@ -29,6 +29,7 @@ class Preview extends StatefulWidget {
 
 class _PreviewState extends State<Preview> {
   late int seconds = int.tryParse(Store.pref('seconds', '5')) ?? 5;
+  double brush = double.tryParse(Store.pref('brush', '$brushStart')) ?? brushStart;
   String mode = 'look'; // look | draw | text | filter
   Color ink = defaultInk;
   Look look = looks.first;
@@ -285,6 +286,18 @@ class _PreviewState extends State<Preview> {
             ),
           if (mode == 'draw')
             Positioned(
+              left: 16,
+              top: (screen.height - BrushSize.height) / 2,
+              child: BrushSize(
+                value: brush,
+                color: ink,
+                width: screen.width,
+                onChange: (b) => setState(() => brush = b),
+                onDone: () => Store.setPref('brush', '$brush'),
+              ),
+            ),
+          if (mode == 'draw')
+            Positioned(
               left: 0,
               right: 0,
               bottom: pad.bottom + 24,
@@ -434,6 +447,106 @@ class _PreviewState extends State<Preview> {
       child: FractionalTranslation(translation: const Offset(-.5, -.5), child: typing ? child : Transform.rotate(angle: l.rotation, child: child)),
     );
   }
+}
+
+/// Pen thickness: drag up for thicker, a dot in the pen's colour shows the size.
+class BrushSize extends StatefulWidget {
+  const BrushSize({super.key, required this.value, required this.color, required this.width, required this.onChange, required this.onDone});
+  static const height = 220.0;
+  final double value;
+  final Color color;
+
+  /// screen width, to show the real size
+  final double width;
+  final ValueChanged<double> onChange;
+  final VoidCallback onDone;
+  @override
+  State<BrushSize> createState() => _BrushSizeState();
+}
+
+class _BrushSizeState extends State<BrushSize> {
+  bool sliding = false;
+
+  void slide(Offset p) {
+    final k = (1 - p.dy / BrushSize.height).clamp(0.0, 1.0);
+    widget.onChange(brushMin + k * (brushMax - brushMin));
+  }
+
+  void end() {
+    setState(() => sliding = false);
+    widget.onDone();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const h = BrushSize.height;
+    final t = (widget.value - brushMin) / (brushMax - brushMin);
+    final y = (1 - t) * h;
+    final real = widget.value * widget.width;
+    final dot = real.clamp(10.0, double.infinity) + 6;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragStart: (d) {
+        setState(() => sliding = true);
+        slide(d.localPosition);
+      },
+      onVerticalDragUpdate: (d) => slide(d.localPosition),
+      onVerticalDragEnd: (_) => end(),
+      onVerticalDragCancel: end,
+      onTapDown: (d) => slide(d.localPosition),
+      onTapUp: (_) => widget.onDone(),
+      child: SizedBox(
+        width: 36,
+        height: h,
+        child: Stack(clipBehavior: Clip.none, alignment: Alignment.topCenter, children: [
+          const CustomPaint(size: Size(24, h), painter: _Wedge()),
+          Positioned(
+            top: y - dot / 2,
+            child: Container(
+              width: dot,
+              height: dot,
+              decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 6)]),
+            ),
+          ),
+          if (sliding)
+            Positioned(
+              left: 56,
+              top: y - real / 2,
+              child: Container(
+                width: real,
+                height: real,
+                decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle, border: Border.all(color: Colors.white60, width: 2)),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// The slider's track: thin at the bottom, thick at the top.
+class _Wedge extends CustomPainter {
+  const _Wedge();
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final path = Path()
+      ..moveTo(2, 0)
+      ..lineTo(w - 2, 0)
+      ..lineTo(w / 2 + 2, h)
+      ..lineTo(w / 2 - 2, h)
+      ..close();
+    canvas.drawShadow(path, Colors.black, 3, false);
+    canvas.drawPath(path, Paint()..color = Colors.white.withValues(alpha: .45));
+    canvas.drawPath(path, Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..strokeJoin = StrokeJoin.round);
+  }
+
+  @override
+  bool shouldRepaint(_Wedge old) => false;
 }
 
 /// The ink swatches, under a rainbow "+" one that swaps them for a bar to pick any colour from.

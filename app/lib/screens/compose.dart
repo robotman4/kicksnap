@@ -44,7 +44,8 @@ class TextLabel {
   bool get free => style != 'bar';
 }
 
-const brush = 0.012; // of screen width
+// pen thickness, as a fraction of screen width (same in frontend/src/screens/Preview.tsx)
+const brushMin = 0.005, brushMax = 0.05, brushStart = 0.012;
 // font sizes as a fraction of screen height, shared by the editor and the output
 const fontSizes = {'bar': 0.028, 'big': 0.065, 'pill': 0.045, 'soft': 0.055};
 const minScale = .4, maxScale = 4.0;

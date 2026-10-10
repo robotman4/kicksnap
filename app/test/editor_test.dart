@@ -81,6 +81,11 @@ void main() {
     await t.dragFrom(br.topCenter + const Offset(0, 120), const Offset(0, 120));
     await t.pumpAndSettle();
     expect(inks.contains(t.widget<Palette>(find.byType(Palette)).color), isFalse);
+    // pen size: drag the slider up, thicker
+    final before = t.widget<BrushSize>(find.byType(BrushSize)).value;
+    await t.drag(find.byType(BrushSize), const Offset(0, -80));
+    await t.pumpAndSettle();
+    expect(t.widget<BrushSize>(find.byType(BrushSize)).value, greaterThan(before));
     expect(t.takeException(), isNull);
     // paint each style
     final rec = ui.PictureRecorder();
