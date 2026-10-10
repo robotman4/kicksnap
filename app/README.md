@@ -130,7 +130,7 @@ flutter run --release --dart-define=KIKS_SERVER=https://kiks.example.com   # sta
 ```
 
 There's no `.ipa` to download: an iPhone only installs apps signed for it, so the build has to come from your
-Mac (or TestFlight). On iPhone, passkeys aren't available yet (sign in by scanning the QR from another device).
+Mac (or TestFlight). Free iPhone builds have no passkeys (sign in by scanning the QR from another device).
 
 First start: General → VPN & Device Management → trust your developer certificate, then open Kiks again.
 
@@ -157,11 +157,19 @@ be that domain.
 can sign an app with that key, so once there's a release key, set `ANDROID_CERTS` on the server to its
 fingerprint only (`keytool -list -v -keystore kiks-release.jks | grep SHA256`).
 
-iPhone: not yet. It needs the paid Apple account: the Associated Domains capability with
-`webcredentials:snap.getkiks.com` in Xcode, `IOS_APP_IDS=<TEAMID>.com.getkiks.app` on the server (it then serves
-`apple-app-site-association`), and the Swift side of the passkey channel. iOS only trusts domains compiled into
-the app, so on iPhone passkeys would work for snap.getkiks.com but not self-hosted servers.
+iPhone: the code is in (`AppDelegate.swift`, same `kiks/passkey` channel), but iOS only allows passkeys for
+domains compiled into the app, which needs the paid Apple account. Free builds show a note instead of the button.
+To turn it on:
+
+1. Xcode → Runner → **Signing & Capabilities** → **+ Capability** → **Associated Domains** → add
+   `webcredentials:snap.robotman4.se` (one line per server; `webcredentials:snap.getkiks.com` for the public one).
+   While testing, `webcredentials:snap.robotman4.se?mode=developer` skips Apple's cache (iPhone in Developer Mode).
+2. Server: `IOS_APP_IDS=<TEAMID>.com.getkiks.app` (Team ID from developer.apple.com → Membership). Check
+   `https://<server>/.well-known/apple-app-site-association` returns JSON.
+3. Build with `--dart-define=KIKS_IOS_PASSKEYS=true` (`flutter run --release ...` or `flutter build ipa ...`).
+
+Self-hosted servers not in that list can't use passkeys on iPhone; QR linking always works.
 
 ## Not in the app (use the web app)
 
-The admin view, saving a snap to the gallery, and passkeys on iPhone (above).
+The admin view, saving a snap to the gallery, and passkeys on free iPhone builds (above).

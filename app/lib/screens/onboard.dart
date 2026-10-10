@@ -296,6 +296,9 @@ class _BackState extends State<_Back> {
         const Spacer(),
         if (error.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 12), child: Center(child: Text(error, textAlign: TextAlign.center, style: font(16, color: danger)))),
         if (passkeysHere) BigButton(label: 'use my passkey', icon: Icons.fingerprint_rounded, onTap: busy ? null : passkey),
+        if (passkeysNeedPaidBuild)
+          Text('passkeys on iPhone come with the App Store / TestFlight build. for now, scan the code with another device.',
+              textAlign: TextAlign.center, style: font(14, weight: FontWeight.w700, color: Colors.white38)),
       ]);
 }
 

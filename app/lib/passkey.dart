@@ -1,9 +1,10 @@
-/// Passkeys through the platform (Android Credential Manager, see MainActivity.kt). Same server
-/// endpoints and the same passkeys as the web app: one made in the browser on this server works here.
+/// Passkeys through the platform (Android Credential Manager in MainActivity.kt, iOS AuthenticationServices
+/// in AppDelegate.swift). Same server endpoints and the same passkeys as the web app: one made in the
+/// browser on this server works here.
 ///
-/// Android only for now. Android trusts the app for any Kiks server, since every server serves
-/// /.well-known/assetlinks.json naming it. iOS needs each server's domain compiled into the app
-/// (Associated Domains, paid Apple account), see app/README.md.
+/// Android trusts the app for any Kiks server, since every server serves /.well-known/assetlinks.json
+/// naming it. iOS only for domains compiled into the app (Associated Domains, paid Apple account), so iPhone
+/// builds offer it only when made with --dart-define=KIKS_IOS_PASSKEYS=true (see app/README.md).
 library;
 
 import 'dart:convert';
@@ -17,7 +18,10 @@ import 'models.dart';
 
 const _channel = MethodChannel('kiks/passkey');
 
-bool get passkeysHere => Platform.isAndroid;
+bool get passkeysHere => Platform.isAndroid || (Platform.isIOS && const bool.fromEnvironment('KIKS_IOS_PASSKEYS'));
+
+/// iPhone build without passkeys: say why the button isn't there.
+bool get passkeysNeedPaidBuild => Platform.isIOS && !passkeysHere;
 
 /// The person closed the passkey sheet: say nothing.
 class PasskeyCancelled implements Exception {}
@@ -35,6 +39,7 @@ Future<Object> _ask(String method, String options) async {
 
 /// The usual reason Android refuses: the server doesn't (yet) say it trusts this app.
 Future<String?> _whyNot() async {
+  if (Platform.isIOS) return "this iPhone build can't use passkeys for ${Uri.parse(api.server).host} (Associated Domains)";
   final host = Uri.parse(api.server).host;
   try {
     final r = await http.get(Uri.parse('${api.server}/.well-known/assetlinks.json')).timeout(const Duration(seconds: 8));

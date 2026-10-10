@@ -205,7 +205,7 @@ def test_app_links_for_native_passkeys(client):
     from app.auth import _rp
     from starlette.requests import Request
     native = Request({"type": "http", "path": "/", "headers": [(b"host", b"kiks.example.com")]})
-    assert _rp(native) == ("kiks.example.com", android_origins())
+    assert _rp(native) == ("kiks.example.com", [*android_origins(), "https://kiks.example.com"])
     web = Request({"type": "http", "path": "/", "scheme": "http", "server": ("testserver", 80),
                    "headers": [(b"host", b"testserver"), (b"origin", b"http://testserver")]})
     assert _rp(web) == ("testserver", ["http://testserver"])  # a browser can't present the app's origin

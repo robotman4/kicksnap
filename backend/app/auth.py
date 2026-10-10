@@ -308,16 +308,17 @@ def android_origins() -> list[str]:
 def _rp(request: Request) -> tuple[str, list[str]]:
     """RP ID and the origins a passkey may have signed for, never one the request names.
 
-    Browsers always send Origin: it has to be our own web app. The native app sends none; then only our
-    Android app's own origin is accepted, which nothing but an app signed with ANDROID_CERTS can produce
-    (Android puts it in the signed client data). That doesn't depend on how the proxy forwards the scheme."""
+    Browsers always send Origin: it has to be our own web app. The native app sends none; then only what the
+    phone itself puts in the signed client data is accepted: our Android app's origin (nothing but an app
+    signed with ANDROID_CERTS can produce it) or, from the iPhone app, https://<RP ID> (iOS only allows that
+    for apps listed in our apple-app-site-association). Neither depends on how the proxy forwards the scheme."""
     origin = request.headers.get("origin")
     if origin is None:
         host = urlparse("//" + request.headers.get("host", "")).hostname or ""
         rp_id = os.getenv("RP_ID") or host
         if not rp_id or (host != rp_id and not host.endswith("." + rp_id)):
             raise HTTPException(400, "passkey failed: this address doesn't match RP_ID")
-        return rp_id, android_origins()
+        return rp_id, [*android_origins(), f"https://{rp_id}"]
     if not own_origin(request, origin):
         raise HTTPException(400, "passkey failed: open Kiks on its own address")
     host = urlparse(origin).hostname or ""
