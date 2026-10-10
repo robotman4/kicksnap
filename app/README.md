@@ -126,8 +126,11 @@ On the iPhone: plug it in, trust the Mac, then Settings → Privacy & Security �
 
 ```bash
 flutter run --release                                  # builds, installs and starts it on the plugged-in phone
-flutter run --release --dart-define=KIKS_SERVER=https://kiks.example.com
+flutter run --release --dart-define=KIKS_SERVER=https://kiks.example.com   # start on your own server
 ```
+
+There's no `.ipa` to download: an iPhone only installs apps signed for it, so the build has to come from your
+Mac (or TestFlight). On iPhone, passkeys aren't available yet (sign in by scanning the QR from another device).
 
 First start: General → VPN & Device Management → trust your developer certificate, then open Kiks again.
 
