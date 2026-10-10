@@ -24,18 +24,43 @@ class Stroke {
   final List<Offset> pts;
 }
 
+/// Text styles, in the order tapping T cycles through them: the full-width bar, then the
+/// free ones (bold outline, colour pill, soft shadow) that move with a drag and resize with a pinch.
+const textStyles = ['bar', 'big', 'pill', 'soft'];
+
 class TextLabel {
-  TextLabel({this.text = '', this.big = false, required this.color, this.x = .5, required this.y});
+  TextLabel({this.text = '', this.style = 'bar', required this.color, this.x = .5, required this.y, this.scale = 1});
   String text;
-  bool big;
+  String style;
   Color color;
   double x, y;
+
+  /// pinch size of the free styles
+  double scale;
+  bool get free => style != 'bar';
 }
 
 const brush = 0.012; // of screen width
 // font sizes as a fraction of screen height, shared by the editor and the output
-const fontBar = 0.028, fontBig = 0.065;
+const fontSizes = {'bar': 0.028, 'big': 0.065, 'pill': 0.045, 'soft': 0.055};
+const minScale = .4, maxScale = 4.0;
 const maxSide = 4096;
+
+double labelSize(TextLabel l, double screenH) => fontSizes[l.style]! * screenH * (l.free ? l.scale : 1);
+
+/// The camera's viewfinder and photos are cropped to this (portrait width / height):
+/// a bit taller than the sensor's 3:4, so the picture fills more of the screen.
+const viewAspect = 3 / 5;
+
+/// The centre part of `full` with the long side / short side ratio of `aspect`
+/// (portrait or landscape, following the media).
+Rect cropRect(Size full, double? aspect) {
+  if (aspect == null || full.isEmpty) return Offset.zero & full;
+  final a = full.width > full.height ? 1 / aspect : aspect;
+  final w = full.width / full.height > a ? full.height * a : full.width;
+  final h = w / a;
+  return Rect.fromLTWH((full.width - w) / 2, (full.height - h) / 2, w, h);
+}
 
 Rect containRect(Size media, Size box) {
   if (media.isEmpty) return Offset.zero & box;
@@ -66,37 +91,60 @@ void paintStrokes(Canvas canvas, List<Stroke> strokes, Size screen) {
   }
 }
 
-TextStyle labelStyle(TextLabel l, double size, {Paint? stroke}) => TextStyle(
-      fontFamily: 'Nunito',
-      fontSize: size,
-      fontWeight: l.big ? FontWeight.w900 : FontWeight.w600,
-      fontVariations: [ui.FontVariation('wght', l.big ? 900 : 600)],
-      color: stroke == null ? (l.big ? l.color : Colors.white) : null,
-      foreground: stroke,
-    );
+const _weights = {'bar': 600, 'big': 900, 'pill': 800, 'soft': 800};
+
+TextStyle labelStyle(TextLabel l, double size, {Paint? stroke}) {
+  final w = _weights[l.style]!;
+  return TextStyle(
+    fontFamily: 'Nunito',
+    fontSize: size,
+    fontWeight: FontWeight.values[w ~/ 100 - 1],
+    fontVariations: [ui.FontVariation('wght', w.toDouble())],
+    color: stroke != null
+        ? null
+        : switch (l.style) {
+            'bar' => Colors.white,
+            'pill' => onColor(l.color),
+            _ => l.color,
+          },
+    foreground: stroke,
+    shadows: l.style == 'soft' && stroke == null ? [Shadow(color: const Color(0x99000000), offset: Offset(0, size * .06), blurRadius: size * .18)] : null,
+  );
+}
+
+/// The outline of the bold style: black, or white on very dark colours.
+Paint labelOutline(TextLabel l, double size) => Paint()
+  ..style = PaintingStyle.stroke
+  ..strokeWidth = size * .14
+  ..strokeJoin = StrokeJoin.round
+  ..color = l.color.computeLuminance() < .08 ? Colors.white : Colors.black;
+
+/// Padding of the pill style around its text, as a fraction of the font size.
+const pillPadX = .45, pillPadY = .2, pillRadius = .35;
 
 void paintLabel(Canvas canvas, TextLabel l, Size screen, Rect r) {
   if (l.text.trim().isEmpty) return;
-  final size = (l.big ? fontBig : fontBar) * screen.height;
+  final size = labelSize(l, screen.height);
   final y = l.y * screen.height;
-  TextPainter tp(TextStyle st) => TextPainter(text: TextSpan(text: l.text, style: st), textDirection: TextDirection.ltr, maxLines: 1, ellipsis: '…')..layout(maxWidth: r.width * .94);
-  if (!l.big) {
+  TextPainter tp(TextStyle st, {double? maxWidth}) =>
+      TextPainter(text: TextSpan(text: l.text, style: st), textDirection: TextDirection.ltr, maxLines: 1, ellipsis: maxWidth == null ? null : '…')..layout(maxWidth: maxWidth ?? double.infinity);
+  if (!l.free) {
     final bh = size * 2;
     canvas.drawRect(Rect.fromLTWH(r.left, y - bh / 2, r.width, bh), Paint()..color = const Color(0x8C000000));
-    final t = tp(labelStyle(l, size));
+    final t = tp(labelStyle(l, size), maxWidth: r.width * .94);
     t.paint(canvas, Offset(r.left + (r.width - t.width) / 2, y - t.height / 2));
-  } else {
-    final outline = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = size * .14
-      ..strokeJoin = StrokeJoin.round
-      ..color = l.color == Colors.black ? Colors.white : Colors.black;
-    final o = tp(labelStyle(l, size, stroke: outline));
-    final f = tp(labelStyle(l, size));
-    final at = Offset(l.x * screen.width - f.width / 2, y - f.height / 2);
-    o.paint(canvas, at);
-    f.paint(canvas, at);
+    return;
   }
+  // the free styles are one line, centred on their spot, as wide as the text
+  final f = tp(labelStyle(l, size));
+  final c = Offset(l.x * screen.width, y);
+  final at = c - Offset(f.width / 2, f.height / 2);
+  if (l.style == 'pill') {
+    final box = Rect.fromCenter(center: c, width: f.width + size * pillPadX * 2, height: f.height + size * pillPadY * 2);
+    canvas.drawRRect(RRect.fromRectAndRadius(box, Radius.circular(size * pillRadius)), Paint()..color = l.color);
+  }
+  if (l.style == 'big') tp(labelStyle(l, size, stroke: labelOutline(l, size))).paint(canvas, at);
+  f.paint(canvas, at);
 }
 
 String videoMime(String path) {
@@ -107,8 +155,9 @@ String videoMime(String path) {
   return 'video/mp4';
 }
 
-/// Runs after the editor closed. `screen` is the editor's size, `dims` the media's (upright).
-Future<Made> compose(Capture cap, Size dims, Size screen, List<Stroke> strokes, TextLabel? label) async {
+/// Runs after the editor closed. `screen` is the editor's size, `dims` the media's as shown
+/// (upright, after the crop). Photos come out cropped to `cap.crop` and with the `look` filter.
+Future<Made> compose(Capture cap, Size dims, Size screen, List<Stroke> strokes, TextLabel? label, Look look) async {
   final decorated = strokes.isNotEmpty || (label != null && label.text.trim().isNotEmpty);
   final r = containRect(dims, screen);
 
@@ -117,28 +166,27 @@ Future<Made> compose(Capture cap, Size dims, Size screen, List<Stroke> strokes, 
     if (!decorated) return (media: media, overlay: null, mime: videoMime(cap.path));
     final fit = (maxSide / (dims.width > dims.height ? dims.width : dims.height)).clamp(0, 1).toDouble();
     final w = (dims.width * fit).round(), h = (dims.height * fit).round();
-    final png = await _render(w, h, screen, r, strokes, label, null, false);
+    final png = await _render(w, h, screen, r, strokes, label, null, Rect.zero, false, null);
     return (media: media, overlay: png, mime: videoMime(cap.path));
   }
 
-  if (!decorated && !cap.mirror) {
+  if (!decorated && !cap.mirror && cap.crop == null && look.matrix == null) {
     // nothing to draw: re-encode natively, which also turns it upright and strips EXIF (GPS etc.)
     final jpeg = await FlutterImageCompress.compressWithFile(cap.path, minWidth: 3072, minHeight: 3072, quality: 92, keepExif: false, autoCorrectionAngle: true);
     if (jpeg != null) return (media: jpeg, overlay: null, mime: 'image/jpeg');
   }
 
   final bytes = await File(cap.path).readAsBytes();
-  final probe = await ui.instantiateImageCodec(bytes);
-  final first = (await probe.getNextFrame()).image;
-  final fit = (maxSide / (first.width > first.height ? first.width : first.height)).clamp(0, 1).toDouble();
-  final w = (first.width * fit).round(), h = (first.height * fit).round();
-  final img = fit < 1 ? (await (await ui.instantiateImageCodec(bytes, targetWidth: w, targetHeight: h)).getNextFrame()).image : first;
-  final png = await _render(w, h, screen, containRect(Size(w.toDouble(), h.toDouble()), screen), strokes, label, img, cap.mirror);
+  final img = (await (await ui.instantiateImageCodec(bytes)).getNextFrame()).image;
+  final src = cropRect(Size(img.width.toDouble(), img.height.toDouble()), cap.crop);
+  final fit = (maxSide / (src.width > src.height ? src.width : src.height)).clamp(0, 1).toDouble();
+  final w = (src.width * fit).round(), h = (src.height * fit).round();
+  final png = await _render(w, h, screen, containRect(Size(w.toDouble(), h.toDouble()), screen), strokes, label, img, src, cap.mirror, look.matrix);
   final jpeg = await FlutterImageCompress.compressWithList(png, minWidth: 8192, minHeight: 8192, quality: 92, format: CompressFormat.jpeg, keepExif: false);
   return (media: jpeg, overlay: null, mime: 'image/jpeg');
 }
 
-Future<Uint8List> _render(int w, int h, Size screen, Rect r, List<Stroke> strokes, TextLabel? label, ui.Image? photo, bool mirror) async {
+Future<Uint8List> _render(int w, int h, Size screen, Rect r, List<Stroke> strokes, TextLabel? label, ui.Image? photo, Rect src, bool mirror, List<double>? matrix) async {
   final rec = ui.PictureRecorder();
   final canvas = Canvas(rec, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
   if (photo != null) {
@@ -147,7 +195,9 @@ Future<Uint8List> _render(int w, int h, Size screen, Rect r, List<Stroke> stroke
       canvas.translate(w.toDouble(), 0);
       canvas.scale(-1, 1);
     }
-    canvas.drawImageRect(photo, Rect.fromLTWH(0, 0, photo.width.toDouble(), photo.height.toDouble()), Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()), Paint()..filterQuality = FilterQuality.high);
+    final paint = Paint()..filterQuality = FilterQuality.high;
+    if (matrix != null) paint.colorFilter = ColorFilter.matrix(matrix);
+    canvas.drawImageRect(photo, src, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()), paint);
     canvas.restore();
   }
   // screen px -> media px, through the rect the media is shown in
@@ -161,8 +211,39 @@ Future<Uint8List> _render(int w, int h, Size screen, Rect r, List<Stroke> stroke
   return data!.buffer.asUint8List();
 }
 
+/// Photo filters: a colour matrix each (5x4, offsets in 0..255).
+/// Same numbers as LOOKS in frontend/src/lib/looks.ts.
+class Look {
+  const Look(this.name, this.matrix);
+  final String name;
+  final List<double>? matrix;
+}
+
+const looks = [
+  Look('original', null),
+  Look('vivid', [1.4627, -0.3476, -0.0351, 0, -10.24, -0.1033, 1.2184, -0.0351, 0, -10.24, -0.1033, -0.3476, 1.5309, 0, -10.24, 0, 0, 0, 1, 0]),
+  Look('warm', [1.1435, -0.0758, -0.0077, 0, 12, -0.0213, 1.0285, -0.0072, 0, 4, -0.0183, -0.0615, 0.9398, 0, 0, 0, 0, 0, 1, 0]),
+  Look('cool', [0.9354, -0.0322, -0.0032, 0, 0, -0.0106, 1.0142, -0.0036, 0, 4, -0.0115, -0.0386, 1.1301, 0, 16, 0, 0, 0, 1, 0]),
+  Look('mono', [0.2126, 0.7152, 0.0722, 0, 0, 0.2126, 0.7152, 0.0722, 0, 0, 0.2126, 0.7152, 0.0722, 0, 0, 0, 0, 0, 1, 0]),
+  Look('noir', [0.3083, 1.037, 0.1047, 0, -67.6, 0.3083, 1.037, 0.1047, 0, -67.6, 0.3083, 1.037, 0.1047, 0, -67.6, 0, 0, 0, 1, 0]),
+  Look('fade', [0.5558, 0.3083, 0.0567, 0, 37.04, 0.1175, 0.7095, 0.0513, 0, 37.04, 0.0965, 0.2373, 0.4681, 0, 37.04, 0, 0, 0, 1, 0]),
+];
+
 /// Snaps are mostly shown in the accent; kept here so the editor and the composer agree.
 const inks = [Colors.white, Colors.black, Color(0xFFFF3D5A), Color(0xFFFF8A3D), Color(0xFFFFE14D), Color(0xFFC6FF3D), Color(0xFF3DD9FF), Color(0xFF7C5CFF), Color(0xFFFF5CD6)];
 
 Color get defaultInk => inks[5];
+
+/// The custom colour bar, top to bottom. Same stops as SPECTRUM in frontend/src/lib/looks.ts.
+const spectrum = [
+  Color(0xFFFFFFFF), Color(0xFFFF0000), Color(0xFFFF8000), Color(0xFFFFFF00), Color(0xFF00FF00),
+  Color(0xFF00FFFF), Color(0xFF0000FF), Color(0xFF8000FF), Color(0xFFFF00FF), Color(0xFF000000),
+];
+
+/// The colour at 0..1 down the bar.
+Color spectrumAt(double t) {
+  final p = t.clamp(0.0, 1.0) * (spectrum.length - 1);
+  final i = p.floor().clamp(0, spectrum.length - 2);
+  return Color.lerp(spectrum[i], spectrum[i + 1], p - i)!;
+}
 Color inkOn(Color c) => onColor(c);

@@ -29,18 +29,22 @@ class Preview extends StatefulWidget {
 
 class _PreviewState extends State<Preview> {
   late int seconds = int.tryParse(Store.pref('seconds', '5')) ?? 5;
-  String mode = 'look'; // look | draw | text
+  String mode = 'look'; // look | draw | text | filter
   Color ink = defaultInk;
+  Look look = looks.first;
   final strokes = <Stroke>[];
   Stroke? drawing;
   TextLabel? label;
   final text = TextEditingController();
   final focus = FocusNode();
+  // keeps the field (and the keyboard) when T flips between styles that wrap it differently
+  final field = GlobalKey();
+
+  /// the media's size as shown: upright, after the camera's crop
   Size dims = Size.zero;
   VideoPlayerController? video;
   bool sending = false;
-  Offset? drag;
-  bool dragged = false;
+  double pinchFrom = 1;
 
   bool get isVideo => widget.capture.kind == 'video';
 
@@ -60,7 +64,8 @@ class _PreviewState extends State<Preview> {
       });
     } else {
       FileImage(File(widget.capture.path)).resolve(ImageConfiguration.empty).addListener(ImageStreamListener((info, _) {
-        if (mounted) setState(() => dims = Size(info.image.width.toDouble(), info.image.height.toDouble()));
+        final full = Size(info.image.width.toDouble(), info.image.height.toDouble());
+        if (mounted) setState(() => dims = cropRect(full, widget.capture.crop).size);
       }));
     }
   }
@@ -78,8 +83,8 @@ class _PreviewState extends State<Preview> {
   void tapText(Size screen) {
     buzz(6);
     if (mode == 'text' && label != null) {
-      // second tap on T flips the style, like Snapchat
-      setState(() => label!.big = !label!.big);
+      // another tap on T moves on to the next style, like Snapchat
+      setState(() => label!.style = textStyles[(textStyles.indexOf(label!.style) + 1) % textStyles.length]);
       return;
     }
     // start text in the lower part of the picture itself
@@ -98,6 +103,11 @@ class _PreviewState extends State<Preview> {
     focus.unfocus();
   }
 
+  void pickInk(Color c) => setState(() {
+        ink = c;
+        if (mode == 'text') label?.color = c;
+      });
+
   void cycleTimer() {
     buzz(5);
     setState(() => seconds = timers[(timers.indexOf(seconds) + 1) % timers.length]);
@@ -107,7 +117,7 @@ class _PreviewState extends State<Preview> {
     if (to.isEmpty || sending) return;
     sending = true;
     video?.pause();
-    final made = compose(widget.capture, dims, screen, List.of(strokes), label);
+    final made = compose(widget.capture, dims, screen, List.of(strokes), label, look);
     Navigator.of(context).pop();
     widget.onSend(made, to, isVideo ? 0 : seconds);
   }
@@ -128,10 +138,20 @@ class _PreviewState extends State<Preview> {
     return key.substring(2);
   }
 
+  /// Two fingers anywhere resize the free text; dragging it is on the text itself.
+  void pinchStart(ScaleStartDetails d) => pinchFrom = label?.scale ?? 1;
+
+  void pinch(ScaleUpdateDetails d) {
+    final l = label;
+    if (l == null || !l.free || d.pointerCount < 2) return;
+    setState(() => l.scale = (pinchFrom * d.scale).clamp(minScale, maxScale));
+  }
+
   @override
   Widget build(BuildContext context) {
     final pad = MediaQuery.paddingOf(context);
     final kb = MediaQuery.viewInsetsOf(context).bottom;
+    final colours = mode == 'draw' || (mode == 'text' && label != null && label!.free);
     return Scaffold(
       backgroundColor: Colors.black,
       // the keyboard floats over the snap; nothing moves
@@ -140,7 +160,7 @@ class _PreviewState extends State<Preview> {
         final screen = box.biggest;
         final r = containRect(dims, screen);
         return Stack(children: [
-          Positioned.fill(child: _media()),
+          Positioned.fill(child: _media(r)),
           // drawing layer
           Positioned.fill(
             child: IgnorePointer(
@@ -156,9 +176,13 @@ class _PreviewState extends State<Preview> {
               ),
             ),
           ),
-          // tap the picture to start typing
-          if (mode == 'look') Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => tapText(screen))),
-          if (mode == 'text') Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: finishText)),
+          // tap the picture to start typing, pinch it to resize the text
+          if (mode == 'look')
+            Positioned.fill(
+              child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => tapText(screen), onScaleStart: pinchStart, onScaleUpdate: pinch),
+            ),
+          if (mode == 'text' || mode == 'filter')
+            Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: mode == 'text' ? finishText : () => setState(() => mode = 'look'))),
           if (label != null) _label(screen, r, kb),
           // top-left: close / undo
           Positioned(
@@ -178,39 +202,23 @@ class _PreviewState extends State<Preview> {
             top: pad.top + 14,
             child: Column(children: [
               RoundButton(icon: Icons.title_rounded, on: mode == 'text', onTap: () => tapText(screen)),
-              const SizedBox(height: 12),
-              RoundButton(icon: Icons.edit_rounded, on: mode == 'draw', tint: mode == 'draw' ? ink : null, onTap: () {
-                buzz(6);
-                if (mode == 'text') finishText();
-                setState(() => mode = mode == 'draw' ? 'look' : 'draw');
-              }),
-              if (mode == 'draw') ...[
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(99)),
-                  child: Column(children: [
-                    for (final c in inks)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Press(
-                          onTap: () => setState(() => ink = c),
-                          haptic: 4,
-                          child: AnimatedScale(
-                            scale: c == ink ? 1.25 : 1,
-                            duration: const Duration(milliseconds: 150),
-                            child: Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: c == ink ? Colors.white : Colors.white30, width: 3)),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ]),
-                ),
+              if (mode != 'text') ...[
+                const SizedBox(height: 12),
+                RoundButton(icon: Icons.edit_rounded, on: mode == 'draw', tint: mode == 'draw' ? ink : null, onTap: () {
+                  buzz(6);
+                  setState(() => mode = mode == 'draw' ? 'look' : 'draw');
+                }),
               ],
-              if (mode != 'draw' && !isVideo) ...[
+              if (colours) ...[
+                const SizedBox(height: 10),
+                Palette(color: ink, onPick: pickInk),
+              ],
+              if (mode == 'look' && !isVideo) ...[
+                const SizedBox(height: 12),
+                RoundButton(icon: Icons.auto_awesome_rounded, tint: look.matrix != null ? Colors.white : null, onTap: () {
+                  buzz(6);
+                  setState(() => mode = 'filter');
+                }),
                 const SizedBox(height: 12),
                 RoundButton(
                   icon: Icons.timer_rounded,
@@ -249,6 +257,17 @@ class _PreviewState extends State<Preview> {
                 ),
               ),
             ),
+          if (mode == 'filter')
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: pad.bottom + 24,
+              child: Column(children: [
+                _filters(),
+                const SizedBox(height: 16),
+                Pill(label: 'done', color: Colors.white, textColor: Colors.black, size: 20, pad: 16, onTap: () => setState(() => mode = 'look')),
+              ]),
+            ),
           if (mode == 'draw')
             Positioned(
               left: 0,
@@ -261,14 +280,56 @@ class _PreviewState extends State<Preview> {
     );
   }
 
-  Widget _media() {
+  Widget _filtered(List<double>? m, Widget child) => m == null ? child : ColorFiltered(colorFilter: ColorFilter.matrix(m), child: child);
+
+  Widget _media(Rect r) {
     if (isVideo) {
       final v = video;
       if (v == null || !v.value.isInitialized) return const SizedBox();
       return FittedBox(fit: BoxFit.contain, child: SizedBox(width: v.value.size.width, height: v.value.size.height, child: VideoPlayer(v)));
     }
-    final img = Image.file(File(widget.capture.path), fit: BoxFit.contain, width: double.infinity, height: double.infinity);
-    return widget.capture.mirror ? Transform.flip(flipX: true, child: img) : img;
+    if (dims.isEmpty) return const SizedBox();
+    // the photo whole, or the camera's crop of it (the middle, like the viewfinder)
+    Widget img = Image.file(File(widget.capture.path), fit: BoxFit.cover, width: r.width, height: r.height);
+    if (widget.capture.mirror) img = Transform.flip(flipX: true, child: img);
+    return Stack(children: [Positioned.fromRect(rect: r, child: ClipRect(child: _filtered(look.matrix, img)))]);
+  }
+
+  /// The filter strip: the photo in each look, tap one to use it.
+  Widget _filters() {
+    final thumb = Image.file(File(widget.capture.path), fit: BoxFit.cover, cacheWidth: 240);
+    return SizedBox(
+      height: 104,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          for (final f in looks)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 5),
+              child: Press(
+                haptic: 4,
+                onTap: () => setState(() => look = f),
+                child: Column(children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    width: 68,
+                    height: 76,
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(18), color: f == look ? Colors.white : Colors.transparent),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(15),
+                      child: Transform.flip(flipX: widget.capture.mirror, child: _filtered(f.matrix, thumb)),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(f.name, style: font(13, weight: FontWeight.w800, color: f == look ? Colors.white : Colors.white70)),
+                ]),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   /// While typing, the text sits just above the keyboard (Snapchat-style) and drops back to its
@@ -276,70 +337,195 @@ class _PreviewState extends State<Preview> {
   Widget _label(Size screen, Rect r, double kb) {
     final l = label!;
     final typing = mode == 'text';
-    final size = (l.big ? fontBig : fontBar) * screen.height;
+    var size = labelSize(l, screen.height);
+    // keep a big pinch from overflowing the screen while typing
+    if (typing && l.free) size = size.clamp(0, fontSizes[l.style]! * screen.height * 1.2).toDouble();
     final style = labelStyle(l, size);
-    final y = typing && kb > 0 ? screen.height - kb - 24 - size : l.y * screen.height;
 
     Widget content = typing
-        ? IntrinsicWidth(
-            child: TextField(
-              controller: text,
-              focusNode: focus,
-              maxLength: 80,
-              textAlign: TextAlign.center,
-              style: style,
-              cursorColor: Colors.white,
-              onChanged: (t) => l.text = t,
-              onSubmitted: (_) => finishText(),
-              decoration: const InputDecoration(border: InputBorder.none, counterText: '', isDense: true, contentPadding: EdgeInsets.zero),
+        ? ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: screen.width * .9),
+            child: IntrinsicWidth(
+              child: TextField(
+                key: field,
+                controller: text,
+                focusNode: focus,
+                maxLength: 80,
+                textAlign: TextAlign.center,
+                style: style,
+                cursorColor: l.style == 'pill' ? onColor(l.color) : Colors.white,
+                onChanged: (t) => l.text = t,
+                onSubmitted: (_) => finishText(),
+                decoration: const InputDecoration(border: InputBorder.none, counterText: '', isDense: true, contentPadding: EdgeInsets.zero),
+              ),
             ),
           )
-        : (l.big
-            ? Stack(children: [
-                Text(l.text, style: labelStyle(l, size, stroke: Paint()
-                  ..style = PaintingStyle.stroke
-                  ..strokeWidth = size * .14
-                  ..strokeJoin = StrokeJoin.round
-                  ..color = l.color == Colors.black ? Colors.white : Colors.black)),
-                Text(l.text, style: style),
-              ])
-            : Text(l.text, style: style, maxLines: 1, overflow: TextOverflow.ellipsis));
+        : (l.free ? Text(l.text, style: style, maxLines: 1, softWrap: false) : Text(l.text, style: style, maxLines: 1, overflow: TextOverflow.ellipsis));
+    if (l.style == 'big') {
+      content = Stack(children: [
+        // the outline: same text under it, stroked
+        if (!typing) Text(l.text, style: labelStyle(l, size, stroke: labelOutline(l, size)), maxLines: 1, softWrap: false),
+        content,
+      ]);
+    }
 
     final child = GestureDetector(
-      onPanStart: typing
-          ? null
-          : (d) {
-              drag = d.globalPosition;
-              dragged = false;
-            },
-      onPanUpdate: typing
+      onScaleStart: typing ? null : (d) => pinchFrom = l.scale,
+      onScaleUpdate: typing
           ? null
           : (d) => setState(() {
-                dragged = true;
-                l.x = (l.x + d.delta.dx / screen.width).clamp(.05, .95);
-                l.y = (l.y + d.delta.dy / screen.height).clamp(.08, .92);
+                l.x = (l.x + d.focalPointDelta.dx / screen.width).clamp(l.free ? 0 : .05, l.free ? 1 : .95);
+                l.y = (l.y + d.focalPointDelta.dy / screen.height).clamp(.05, .95);
+                if (l.free && d.pointerCount >= 2) l.scale = (pinchFrom * d.scale).clamp(minScale, maxScale);
               }),
       onTap: typing ? null : () => tapText(screen),
-      child: l.big
-          ? Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: content)
-          : Container(
-              width: r.width,
-              color: const Color(0x8C000000),
-              padding: EdgeInsets.symmetric(vertical: size * .5, horizontal: 12),
-              alignment: Alignment.center,
-              child: content,
-            ),
+      child: switch (l.style) {
+        'bar' => Container(
+            width: r.width,
+            color: const Color(0x8C000000),
+            padding: EdgeInsets.symmetric(vertical: size * .5, horizontal: 12),
+            alignment: Alignment.center,
+            child: content,
+          ),
+        'pill' => Container(
+            padding: EdgeInsets.symmetric(horizontal: size * pillPadX, vertical: size * pillPadY),
+            decoration: BoxDecoration(color: l.color, borderRadius: BorderRadius.circular(size * pillRadius)),
+            child: content,
+          ),
+        _ => content,
+      },
     );
 
-    if (l.big) {
-      return Positioned(
-        top: y - size * .6,
-        left: 0,
-        right: 0,
-        child: Align(alignment: Alignment(typing ? 0 : (l.x * 2 - 1), 0), child: child),
-      );
+    if (!l.free) {
+      final y = typing && kb > 0 ? screen.height - kb - 24 - size : l.y * screen.height;
+      return Positioned(top: y - size, left: r.left, child: child);
     }
-    return Positioned(top: y - size, left: r.left, child: child);
+    if (typing && kb > 0) return Positioned(left: 0, right: 0, bottom: kb + 24, child: Center(child: child));
+    // centred on its spot, as wide as the text (can run off the edges, like the output)
+    return Positioned(
+      left: l.x * screen.width,
+      top: l.y * screen.height,
+      child: FractionalTranslation(translation: const Offset(-.5, -.5), child: child),
+    );
+  }
+}
+
+/// The ink swatches, plus a rainbow one that swaps them for a bar to pick any colour from.
+class Palette extends StatefulWidget {
+  const Palette({super.key, required this.color, required this.onPick});
+  final Color color;
+  final ValueChanged<Color> onPick;
+  @override
+  State<Palette> createState() => _PaletteState();
+}
+
+class _PaletteState extends State<Palette> {
+  bool custom = false;
+  double at = .5;
+  bool sliding = false;
+  static const barHeight = 300.0;
+
+  void slide(double y) {
+    at = (y / barHeight).clamp(0, 1);
+    widget.onPick(spectrumAt(at));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mine = !inks.contains(widget.color);
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(99)),
+      child: Column(children: [
+        if (!custom)
+          for (final c in inks)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Press(
+                onTap: () => widget.onPick(c),
+                haptic: 4,
+                child: AnimatedScale(
+                  scale: c == widget.color ? 1.25 : 1,
+                  duration: const Duration(milliseconds: 150),
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: c == widget.color ? Colors.white : Colors.white30, width: 3)),
+                  ),
+                ),
+              ),
+            )
+        else
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onVerticalDragStart: (d) => setState(() {
+                sliding = true;
+                slide(d.localPosition.dy);
+              }),
+              onVerticalDragUpdate: (d) => setState(() => slide(d.localPosition.dy)),
+              onVerticalDragEnd: (_) => setState(() => sliding = false),
+              onTapDown: (d) => setState(() => slide(d.localPosition.dy)),
+              child: SizedBox(
+                width: 30,
+                height: barHeight,
+                child: Stack(clipBehavior: Clip.none, alignment: Alignment.topCenter, children: [
+                  Container(
+                    width: 22,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(color: Colors.white54, width: 2),
+                      gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: spectrum),
+                    ),
+                  ),
+                  // the handle, with a bigger drop of the colour beside it while sliding
+                  Positioned(
+                    top: at * barHeight - 15,
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3)),
+                    ),
+                  ),
+                  if (sliding)
+                    Positioned(
+                      top: at * barHeight - 26,
+                      right: 44,
+                      child: Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3)),
+                      ),
+                    ),
+                ]),
+              ),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Press(
+            onTap: () => setState(() => custom = !custom),
+            haptic: 4,
+            child: AnimatedScale(
+              scale: mine && !custom ? 1.25 : 1,
+              duration: const Duration(milliseconds: 150),
+              child: Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: mine || custom ? Colors.white : Colors.white30, width: 3),
+                  color: mine && !custom ? widget.color : null,
+                  gradient: mine && !custom ? null : const SweepGradient(colors: [Color(0xFFFF0000), Color(0xFFFFFF00), Color(0xFF00FF00), Color(0xFF00FFFF), Color(0xFF0000FF), Color(0xFFFF00FF), Color(0xFFFF0000)]),
+                ),
+                child: custom ? const Icon(Icons.close_rounded, size: 16, color: Colors.white) : null,
+              ),
+            ),
+          ),
+        ),
+      ]),
+    );
   }
 }
 

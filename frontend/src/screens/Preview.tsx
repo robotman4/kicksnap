@@ -1,9 +1,10 @@
-import { Check, Download, Pencil, Send, Timer, Type, Undo2, X } from "lucide-react";
+import { Check, Download, Pencil, Send, Sparkles, Timer, Type, Undo2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Media } from "../components/Media";
 import { Sheet } from "../components/Sheet";
-import { buzz, containRect, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
+import { buzz, containRect, onColor, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
+import { applyLook, LookDefs, lookCss, LOOKS, luminance, SPECTRUM, spectrumAt } from "../lib/looks";
 import { useVisualViewport } from "../lib/viewport";
 import { Capture } from "./Camera";
 
@@ -12,13 +13,23 @@ import { Capture } from "./Camera";
 // image through that same rect, so nothing is cropped or upscaled.
 type Pt = [number, number];
 type Stroke = { color: string; width: number; pts: Pt[] };
-type TextStyle = "bar" | "big";
-type Label = { text: string; style: TextStyle; color: string; x: number; y: number };
+// Text styles, in the order tapping T cycles through them: the full-width bar, then the
+// free ones (bold outline, colour pill, soft shadow) that move with a drag and resize with a pinch.
+type TextStyle = "bar" | "big" | "pill" | "soft";
+const STYLES: TextStyle[] = ["bar", "big", "pill", "soft"];
+type Label = { text: string; style: TextStyle; color: string; x: number; y: number; scale: number };
+const free = (l: Label) => l.style !== "bar";
 
 const INKS = ["#FFFFFF", "#000000", "#FF3D5A", "#FF8A3D", "#FFE14D", "#C6FF3D", "#3DD9FF", "#7C5CFF", "#FF5CD6"];
 const BRUSH = 0.012; // of screen width
 // font sizes as a fraction of screen height, shared by DOM preview and canvas output
-const FONT = { bar: 0.028, big: 0.065 };
+const FONT = { bar: 0.028, big: 0.065, pill: 0.045, soft: 0.055 };
+const WEIGHT = { bar: 600, big: 900, pill: 800, soft: 800 };
+const SCALE = { min: 0.4, max: 4 };
+// the pill's padding and corners, in em
+const PILL = { x: 0.45, y: 0.2, r: 0.35, line: 1.2 };
+const outlineFor = (c: string) => (luminance(c) < 0.08 ? "#fff" : "#000");
+const fontSize = (l: Label, h: number) => FONT[l.style] * h * (free(l) ? l.scale : 1);
 
 function drawStrokes(ctx: CanvasRenderingContext2D, strokes: Stroke[], w: number, h: number) {
   ctx.lineCap = "round";
@@ -35,24 +46,47 @@ function drawStrokes(ctx: CanvasRenderingContext2D, strokes: Stroke[], w: number
 
 function drawLabel(ctx: CanvasRenderingContext2D, l: Label, w: number, h: number, r: Rect) {
   if (!l.text.trim()) return;
-  const size = FONT[l.style] * h;
+  const size = fontSize(l, h);
+  const x = l.x * w;
+  const y = l.y * h;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
+  ctx.font = `${WEIGHT[l.style]} ${size}px system-ui, -apple-system, sans-serif`;
   if (l.style === "bar") {
-    ctx.font = `600 ${size}px system-ui, -apple-system, sans-serif`;
     const bh = size * 2;
     ctx.fillStyle = "rgba(0,0,0,.55)";
-    ctx.fillRect(r.x, l.y * h - bh / 2, r.w, bh);
+    ctx.fillRect(r.x, y - bh / 2, r.w, bh);
     ctx.fillStyle = "#fff";
-    ctx.fillText(l.text, r.x + r.w / 2, l.y * h, r.w * 0.94);
-  } else {
-    ctx.font = `900 ${size}px system-ui, -apple-system, sans-serif`;
-    ctx.lineWidth = size * 0.14;
-    ctx.strokeStyle = l.color === "#000000" ? "#fff" : "#000";
-    ctx.strokeText(l.text, l.x * w, l.y * h, r.w * 0.94);
-    ctx.fillStyle = l.color;
-    ctx.fillText(l.text, l.x * w, l.y * h, r.w * 0.94);
+    ctx.fillText(l.text, r.x + r.w / 2, y, r.w * 0.94);
+    return;
   }
+  // the free styles are one line, centred on their spot, as wide as the text
+  if (l.style === "pill") {
+    const bw = ctx.measureText(l.text).width + size * PILL.x * 2;
+    const bh = size * (PILL.line + PILL.y * 2);
+    ctx.fillStyle = l.color;
+    ctx.beginPath();
+    ctx.roundRect(x - bw / 2, y - bh / 2, bw, bh, size * PILL.r);
+    ctx.fill();
+    ctx.fillStyle = onColor(l.color);
+  } else {
+    ctx.fillStyle = l.color;
+  }
+  if (l.style === "big") {
+    ctx.lineWidth = size * 0.14;
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = outlineFor(l.color);
+    ctx.strokeText(l.text, x, y);
+  }
+  if (l.style === "soft") {
+    // shadows ignore the canvas transform, so scale them by hand
+    const k = ctx.getTransform().a;
+    ctx.shadowColor = "rgba(0,0,0,.6)";
+    ctx.shadowOffsetY = size * 0.06 * k;
+    ctx.shadowBlur = size * 0.18 * k;
+  }
+  ctx.fillText(l.text, x, y);
+  ctx.shadowColor = "transparent";
 }
 
 const MAX_SIDE = 4096;
@@ -61,7 +95,7 @@ const MAX_SIDE = 4096;
  * Bake drawing + text into what gets sent, at the media's own resolution.
  * Photos come out as one JPEG; videos keep their file and get a PNG layer the same size.
  */
-async function compose(capture: Capture, dims: { w: number; h: number }, strokes: Stroke[], label: Label | null) {
+async function compose(capture: Capture, dims: { w: number; h: number }, strokes: Stroke[], label: Label | null, look: string) {
   const decorated = strokes.length > 0 || !!label?.text.trim();
   // Photos always get re-encoded: that also strips EXIF (GPS etc.) from gallery picks.
   if (capture.kind === "video" && !decorated) return { file: capture.blob, overlay: null };
@@ -79,6 +113,7 @@ async function compose(capture: Capture, dims: { w: number; h: number }, strokes
     img.src = capture.url;
     await img.decode();
     ctx.drawImage(img, 0, 0, W, H);
+    applyLook(ctx, W, H, look);
   }
   // screen px -> image px, through the rect the media is shown in
   const sw = window.innerWidth;
@@ -95,7 +130,6 @@ async function compose(capture: Capture, dims: { w: number; h: number }, strokes
     : { file: capture.blob, overlay: await out("image/png") };
 }
 
-const l0 = (l: Label | null) => l?.style;
 
 /** After the shutter: doodle, add text, pick people, send. */
 export function Preview({
@@ -116,8 +150,9 @@ export function Preview({
   onAddFriends: () => void;
 }) {
   const [seconds, setSeconds] = useState(() => Number(pref.get("seconds", "5")));
-  const [mode, setMode] = useState<"look" | "draw" | "text">("look");
+  const [mode, setMode] = useState<"look" | "draw" | "text" | "filter">("look");
   const [ink, setInk] = useState(INKS[5]);
+  const [look, setLook] = useState("original");
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [label, setLabel] = useState<Label | null>(null);
   const [picking, setPicking] = useState(false);
@@ -131,6 +166,10 @@ export function Preview({
   const drawing = useRef<Stroke | null>(null);
   const textInput = useRef<HTMLInputElement>(null);
   const dragText = useRef<{ dx: number; dy: number; moved: boolean } | null>(null);
+  // two fingers anywhere resize the free text
+  const fingers = useRef(new Map<number, Pt>());
+  const pinch = useRef<{ dist: number; scale: number } | null>(null);
+  const pinchedAt = useRef(0);
 
   // redraw strokes whenever they change
   useEffect(() => {
@@ -170,14 +209,43 @@ export function Preview({
   const tapText = () => {
     buzz(6);
     if (mode === "text" && label) {
-      // second tap on T flips the style, like Snapchat
-      setLabel({ ...label, style: label.style === "bar" ? "big" : "bar" });
+      // another tap on T moves on to the next style, like Snapchat
+      setLabel({ ...label, style: STYLES[(STYLES.indexOf(label.style) + 1) % STYLES.length] });
       return;
     }
     // start text in the lower part of the photo itself, not on the blurred fill
     const y = (rect.y + rect.h * 0.75) / window.innerHeight;
-    setLabel((l) => l ?? { text: "", style: "bar", color: ink, x: 0.5, y });
+    setLabel((l) => l ?? { text: "", style: "bar", color: ink, x: 0.5, y, scale: 1 });
     setMode("text");
+  };
+
+  const pickInk = (c: string) => {
+    setInk(c);
+    if (mode === "text") setLabel((l) => l && { ...l, color: c });
+  };
+
+  const pinchDown = (e: React.PointerEvent) => {
+    if (e.isPrimary) fingers.current.clear();
+    fingers.current.set(e.pointerId, rel(e));
+    if (fingers.current.size === 2 && mode === "look" && label && free(label)) {
+      const [a, b] = [...fingers.current.values()];
+      pinch.current = { dist: Math.hypot((a[0] - b[0]) * window.innerWidth, (a[1] - b[1]) * window.innerHeight), scale: label.scale };
+      dragText.current = null;
+    }
+  };
+  const pinchMove = (e: React.PointerEvent) => {
+    if (!fingers.current.has(e.pointerId)) return;
+    fingers.current.set(e.pointerId, rel(e));
+    const p = pinch.current;
+    if (!p || fingers.current.size !== 2 || !p.dist) return;
+    const [a, b] = [...fingers.current.values()];
+    const dist = Math.hypot((a[0] - b[0]) * window.innerWidth, (a[1] - b[1]) * window.innerHeight);
+    pinchedAt.current = Date.now();
+    setLabel((l) => l && { ...l, scale: Math.min(SCALE.max, Math.max(SCALE.min, (p.scale * dist) / p.dist)) });
+  };
+  const pinchUp = (e: React.PointerEvent) => {
+    fingers.current.delete(e.pointerId);
+    if (fingers.current.size < 2) pinch.current = null;
   };
 
   const finishText = () => {
@@ -203,11 +271,11 @@ export function Preview({
   const send = (recipients = to) => {
     if (!recipients.length || sending) return;
     setSending(true);
-    onSend(() => compose(capture, dims, strokes, label), recipients, seconds);
+    onSend(() => compose(capture, dims, strokes, label, look), recipients, seconds);
   };
 
   const save = async () => {
-    const { file, overlay } = await compose(capture, dims, strokes, label);
+    const { file, overlay } = await compose(capture, dims, strokes, label, look);
     for (const [blob, ext] of [[file, capture.kind === "video" ? "webm" : "jpg"], [overlay, "png"]] as const) {
       if (!blob) continue;
       const a = document.createElement("a");
@@ -220,29 +288,38 @@ export function Preview({
 
   // While typing, the text sits just above the keyboard (Snapchat-style) and drops
   // back to its spot when done. The photo itself never moves.
-  const typingSpot = { top: vv.height - 24, transform: l0(label) === "bar" ? "translateY(-100%)" : "translate(-50%,-100%)" };
-  const labelStyle = (l: Label): React.CSSProperties => ({ ...baseLabelStyle(l), ...(typing ? typingSpot : {}) });
-  const baseLabelStyle = (l: Label): React.CSSProperties =>
-    l.style === "bar"
-      ? { top: `${l.y * 100}%`, left: rect.x, width: rect.w, fontSize: `${FONT.bar * 100}vh`, transform: "translateY(-50%)" }
-      : {
-          top: `${l.y * 100}%`,
-          left: `${l.x * 100}%`,
-          fontSize: `${FONT.big * 100}vh`,
-          transform: "translate(-50%,-50%)",
-          color: l.color,
-          WebkitTextStroke: `${FONT.big * 14}vh ${l.color === "#000000" ? "#fff" : "#000"}`,
-          paintOrder: "stroke fill",
-        };
+  const labelStyle = (l: Label): React.CSSProperties => {
+    const h = window.innerHeight;
+    // keep a big pinch from overflowing the screen while typing
+    const size = typing && free(l) ? Math.min(fontSize(l, h), FONT[l.style] * h * 1.2) : fontSize(l, h);
+    const spot: React.CSSProperties = typing
+      ? { top: vv.height - 24, transform: free(l) ? "translate(-50%,-100%)" : "translateY(-100%)", ...(free(l) ? { left: "50%" } : {}) }
+      : {};
+    const base: React.CSSProperties = { fontSize: size, fontWeight: WEIGHT[l.style], top: `${l.y * 100}%` };
+    if (l.style === "bar") return { ...base, left: rect.x, width: rect.w, transform: "translateY(-50%)", ...spot };
+    const at: React.CSSProperties = { ...base, left: `${l.x * 100}%`, transform: "translate(-50%,-50%)", color: l.color };
+    const look: React.CSSProperties =
+      l.style === "big"
+        ? { WebkitTextStroke: `${size * 0.14}px ${outlineFor(l.color)}`, paintOrder: "stroke fill" }
+        : l.style === "pill"
+          ? { background: l.color, color: onColor(l.color), padding: `${PILL.y}em ${PILL.x}em`, borderRadius: `${PILL.r}em`, lineHeight: PILL.line }
+          : { textShadow: "0 .06em .18em rgba(0,0,0,.6)" };
+    return { ...at, ...look, ...spot };
+  };
 
   return (
     <div
       className="fixed inset-0 z-30 animate-[pop_.25s_ease-out] touch-none bg-black text-white"
       data-nodrag
+      onPointerDown={pinchDown}
+      onPointerMove={pinchMove}
+      onPointerUp={pinchUp}
+      onPointerCancel={pinchUp}
       // iOS pans the page up to show the focused field; undo that so the photo stays put
       style={typing && vv.top ? { transform: `translateY(${vv.top}px)` } : undefined}
     >
-      <Media src={capture.url} kind={capture.kind} loop onDims={setDims} />
+      <LookDefs />
+      <Media src={capture.url} kind={capture.kind} loop onDims={setDims} filter={lookCss(look)} />
 
       <canvas
         ref={canvas}
@@ -254,11 +331,12 @@ export function Preview({
       />
 
       {/* tap the picture to start typing */}
-      {mode === "look" && <button className="absolute inset-0" onClick={tapText} aria-label="add text" />}
+      {mode === "look" && <button className="absolute inset-0" onClick={() => Date.now() - pinchedAt.current > 400 && tapText()} aria-label="add text" />}
+      {mode === "filter" && <button className="absolute inset-0" onClick={() => setMode("look")} aria-label="close filters" />}
 
       {label && (
         <div
-          className={`absolute whitespace-nowrap text-center ${label.style === "bar" ? "bg-black/55 py-[1.4vh] font-semibold backdrop-blur-sm" : "font-black"}`}
+          className={`absolute whitespace-nowrap text-center ${label.style === "bar" ? "bg-black/55 py-[1.4vh] backdrop-blur-sm" : ""}`}
           style={labelStyle(label)}
           onPointerDown={(e) => {
             if (mode !== "look") return;
@@ -271,7 +349,7 @@ export function Preview({
             if (!dragText.current) return;
             const [x, y] = rel(e);
             dragText.current.moved = true;
-            setLabel({ ...label, x: x - dragText.current.dx, y: Math.min(0.92, Math.max(0.08, y - dragText.current.dy)) });
+            setLabel({ ...label, x: x - dragText.current.dx, y: Math.min(0.95, Math.max(0.05, y - dragText.current.dy)) });
           }}
           onPointerUp={() => {
             const tapped = dragText.current && !dragText.current.moved;
@@ -280,16 +358,21 @@ export function Preview({
           }}
         >
           {mode === "text" ? (
-            <input
-              ref={textInput}
-              value={label.text}
-              maxLength={80}
-              onChange={(e) => setLabel({ ...label, text: e.target.value })}
-              onBlur={finishText}
-              onKeyDown={(e) => e.key === "Enter" && finishText()}
-              className="w-[90vw] bg-transparent text-center outline-none"
-              style={{ color: "inherit", font: "inherit" }}
-            />
+            // an invisible copy of the text sizes the box (the free styles hug it), the field sits on it;
+            // one shape for every style, so flipping styles keeps the keyboard up
+            <span className={`relative inline-block ${free(label) ? "" : "w-[90vw]"}`}>
+              <span className="invisible whitespace-pre">{label.text || " "}</span>
+              <input
+                ref={textInput}
+                value={label.text}
+                maxLength={80}
+                onChange={(e) => setLabel({ ...label, text: e.target.value })}
+                onBlur={finishText}
+                onKeyDown={(e) => e.key === "Enter" && finishText()}
+                className="absolute inset-0 w-full bg-transparent p-0 text-center outline-none"
+                style={{ color: "inherit", font: "inherit" }}
+              />
+            </span>
           ) : (
             label.text
           )}
@@ -313,23 +396,18 @@ export function Preview({
         <Round onClick={tapText} label="text" on={mode === "text"}>
           <Type size={28} strokeWidth={2.75} />
         </Round>
-        <Round onClick={() => (buzz(6), setMode(mode === "draw" ? "look" : "draw"))} label="draw" on={mode === "draw"} tint={mode === "draw" ? ink : undefined}>
-          <Pencil size={26} strokeWidth={2.75} />
-        </Round>
-        {mode === "draw" && (
-          <div className="mt-1 flex flex-col items-center gap-2 rounded-full bg-black/30 p-2 backdrop-blur">
-            {INKS.map((c) => (
-              <button
-                key={c}
-                onClick={() => (buzz(4), setInk(c))}
-                aria-label={`ink ${c}`}
-                className={`h-8 w-8 rounded-full border-[3px] transition ease-spring ${c === ink ? "scale-125 border-white" : "border-white/30"}`}
-                style={{ background: c }}
-              />
-            ))}
-          </div>
+        {mode !== "text" && (
+          <Round onClick={() => (buzz(6), setMode(mode === "draw" ? "look" : "draw"))} label="draw" on={mode === "draw"} tint={mode === "draw" ? ink : undefined}>
+            <Pencil size={26} strokeWidth={2.75} />
+          </Round>
         )}
-        {mode !== "draw" && capture.kind === "photo" && (
+        {(mode === "draw" || (mode === "text" && label && free(label))) && <Palette color={ink} onPick={pickInk} />}
+        {mode === "look" && capture.kind === "photo" && (
+          <Round onClick={() => (buzz(6), setMode("filter"))} label="filters" tint={look !== "original" ? "#FFFFFF" : undefined}>
+            <Sparkles size={26} strokeWidth={2.5} />
+          </Round>
+        )}
+        {mode === "look" && capture.kind === "photo" && (
           <Round onClick={cycleTimer} label="view timer">
             <div className="flex flex-col items-center leading-none">
               <Timer size={22} strokeWidth={2.75} />
@@ -337,7 +415,7 @@ export function Preview({
             </div>
           </Round>
         )}
-        {mode !== "draw" && (
+        {mode === "look" && (
           <Round onClick={save} label="save">
             <Download size={26} strokeWidth={2.75} />
           </Round>
@@ -353,6 +431,23 @@ export function Preview({
           >
             {preselect.length ? nameOf(preselect[0]) : "send to"}
             <Send size={26} strokeWidth={2.75} />
+          </button>
+        </div>
+      )}
+      {mode === "filter" && (
+        <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-4 pb-[max(env(safe-area-inset-bottom),24px)]">
+          <div className="flex w-full gap-2.5 overflow-x-auto px-4">
+            {LOOKS.map((f) => (
+              <button key={f.name} onClick={() => (buzz(4), setLook(f.name))} className="flex shrink-0 flex-col items-center gap-1 transition ease-spring active:scale-95">
+                <span className={`block h-[76px] w-[68px] rounded-[18px] p-[3px] transition ${look === f.name ? "bg-white" : ""}`}>
+                  <img src={capture.url} alt="" className="h-full w-full rounded-[15px] object-cover" style={{ filter: lookCss(f.name) }} />
+                </span>
+                <span className={`text-[13px] font-extrabold ${look === f.name ? "text-white" : "text-white/70"}`}>{f.name}</span>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setMode("look")} className="rounded-full bg-white px-8 py-4 text-xl font-black text-black active:scale-95">
+            done
           </button>
         </div>
       )}
@@ -429,5 +524,60 @@ function Round({ children, onClick, label, on, tint }: { children: React.ReactNo
     >
       {children}
     </button>
+  );
+}
+
+/** The ink swatches, plus a rainbow one that swaps them for a bar to pick any colour from. */
+function Palette({ color, onPick }: { color: string; onPick: (c: string) => void }) {
+  const [custom, setCustom] = useState(false);
+  const [at, setAt] = useState(0.5);
+  const [sliding, setSliding] = useState(false);
+  const mine = !INKS.includes(color);
+  const BAR = 300;
+  const slide = (e: React.PointerEvent<HTMLDivElement>) => {
+    const t = Math.min(1, Math.max(0, (e.clientY - e.currentTarget.getBoundingClientRect().top) / BAR));
+    setAt(t);
+    onPick(spectrumAt(t));
+  };
+  return (
+    <div className="mt-1 flex flex-col items-center gap-1.5 rounded-full bg-black/30 p-1.5 backdrop-blur" onMouseDown={(e) => e.preventDefault()}>
+      {!custom &&
+        INKS.map((c) => (
+          <button
+            key={c}
+            onClick={() => (buzz(4), onPick(c))}
+            aria-label={`ink ${c}`}
+            className={`h-[30px] w-[30px] rounded-full border-[3px] transition ease-spring ${c === color ? "scale-125 border-white" : "border-white/30"}`}
+            style={{ background: c }}
+          />
+        ))}
+      {custom && (
+        <div
+          className="relative flex w-[30px] touch-none justify-center"
+          style={{ height: BAR }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            e.currentTarget.setPointerCapture(e.pointerId);
+            setSliding(true);
+            slide(e);
+          }}
+          onPointerMove={(e) => sliding && slide(e)}
+          onPointerUp={() => setSliding(false)}
+          onPointerCancel={() => setSliding(false)}
+        >
+          <div className="h-full w-[22px] rounded-full border-2 border-white/55" style={{ background: `linear-gradient(${SPECTRUM.join(",")})` }} />
+          <div className="absolute h-[30px] w-[30px] rounded-full border-[3px] border-white" style={{ top: at * BAR - 15, background: color }} />
+          {sliding && <div className="absolute right-11 h-[52px] w-[52px] rounded-full border-[3px] border-white" style={{ top: at * BAR - 26, background: color }} />}
+        </div>
+      )}
+      <button
+        onClick={() => (buzz(4), setCustom(!custom))}
+        aria-label="custom colour"
+        className={`grid h-[30px] w-[30px] place-items-center rounded-full border-[3px] transition ease-spring ${mine || custom ? "border-white" : "border-white/30"} ${mine && !custom ? "scale-125" : ""}`}
+        style={{ background: mine && !custom ? color : "conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)" }}
+      >
+        {custom && <X size={14} strokeWidth={4} />}
+      </button>
+    </div>
   );
 }

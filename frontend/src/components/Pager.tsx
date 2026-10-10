@@ -11,6 +11,8 @@ export function Pager({ index, onChange, children }: { index: number; onChange: 
   const [drag, setDrag] = useState(0);
   const start = useRef<{ x: number; y: number; t: number; axis?: "x" | "y" } | null>(null);
   const width = () => window.innerWidth;
+  // fingers down: a second one means a pinch (camera zoom), not a swipe
+  const fingers = useRef(new Set<number>());
 
   // Each panel sits at -1 (left), 0 (showing) or +1 (right) relative to the current one.
   const rel = (i: number) => ((i - index + n + 1) % n) - 1;
@@ -22,6 +24,10 @@ export function Pager({ index, onChange, children }: { index: number; onChange: 
   });
 
   const down = (e: React.PointerEvent) => {
+    // the first finger of a touch starts afresh, so a lost pointerup can't stick
+    if (e.isPrimary) fingers.current.clear();
+    fingers.current.add(e.pointerId);
+    if (fingers.current.size > 1) return cancel();
     if ((e.target as HTMLElement).closest("[data-nodrag]")) return;
     start.current = { x: e.clientX, y: e.clientY, t: performance.now() };
   };
@@ -39,6 +45,7 @@ export function Pager({ index, onChange, children }: { index: number; onChange: 
     setDrag(dx);
   };
   const up = (e: React.PointerEvent) => {
+    fingers.current.delete(e.pointerId);
     const s = start.current;
     start.current = null;
     if (!s || s.axis !== "x") return setDrag(0);
@@ -55,10 +62,11 @@ export function Pager({ index, onChange, children }: { index: number; onChange: 
   };
   // The browser took the gesture over (scroll, image drag, callout): its coordinates
   // are meaningless, so just settle back.
-  const cancel = () => {
+  function cancel(e?: React.PointerEvent) {
+    if (e) fingers.current.delete(e.pointerId);
     start.current = null;
     setDrag(0);
-  };
+  }
 
   return (
     <div

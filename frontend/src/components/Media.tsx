@@ -8,12 +8,15 @@ export function Media({
   loop,
   onEnded,
   onDims,
+  filter,
 }: {
   src: string;
   kind: "photo" | "video";
   loop?: boolean;
   onEnded?: () => void;
   onDims?: (d: { w: number; h: number }) => void;
+  /** CSS filter for the photo (the editor's looks) */
+  filter?: string;
 }) {
   return (
     <>
@@ -25,6 +28,7 @@ export function Media({
           src={src}
           alt=""
           className="absolute inset-0 h-full w-full object-contain"
+          style={filter ? { filter } : undefined}
           onLoad={(e) => onDims?.({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
         />
       ) : (
@@ -34,6 +38,7 @@ export function Media({
           loop={loop}
           playsInline
           className="absolute inset-0 h-full w-full object-contain"
+          style={filter ? { filter } : undefined}
           onLoadedMetadata={(e) => onDims?.({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })}
           onEnded={onEnded}
         />

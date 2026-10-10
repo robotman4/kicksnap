@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Friend } from "../lib/api";
 import { buzz, containRect, pref } from "../lib/feel";
+import { cropRect, VIEW_ASPECT } from "../lib/looks";
 
 export type Capture = { blob: Blob; kind: "photo" | "video"; url: string };
 
@@ -13,7 +14,7 @@ const STREAM = { width: { ideal: 3264 }, height: { ideal: 2448 }, aspectRatio: {
 const VIDEO_BPS = 6_000_000; // keeps a 10s clip around 7-8 MB
 
 // Focus/zoom constraints aren't in the DOM typings yet.
-type CamCaps = MediaTrackCapabilities & { focusMode?: string[]; pointsOfInterest?: unknown };
+type CamCaps = MediaTrackCapabilities & { focusMode?: string[]; pointsOfInterest?: unknown; zoom?: { min: number; max: number } };
 type ImageCaptureT = { takePhoto(o?: { imageWidth?: number; imageHeight?: number }): Promise<Blob>; getPhotoCapabilities(): Promise<{ imageWidth?: { max: number }; imageHeight?: { max: number } }> };
 declare global {
   // eslint-disable-next-line no-var
@@ -29,17 +30,43 @@ async function setFocus(track: MediaStreamTrack, mode: "continuous" | "single-sh
   return true;
 }
 
-/** Re-encode a blob mirrored, for selfies taken through ImageCapture. */
-async function mirror(blob: Blob): Promise<Blob> {
-  const bmp = await createImageBitmap(blob);
+const MAX_DIGITAL_ZOOM = 5;
+const RADIUS = 24;
+
+/**
+ * The photo as the viewfinder showed it: the middle of the frame in VIEW_ASPECT, then
+ * `zoom` (digital zoom, when the camera can't zoom itself), mirrored for selfies.
+ */
+function shape(src: CanvasImageSource, sw: number, sh: number, zoom: number, mirrored: boolean) {
+  const r = cropRect(sw, sh);
+  const w = r.w / zoom;
+  const h = r.h / zoom;
   const c = document.createElement("canvas");
-  c.width = bmp.width;
-  c.height = bmp.height;
+  c.width = Math.round(w);
+  c.height = Math.round(h);
   const ctx = c.getContext("2d")!;
-  ctx.translate(c.width, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(bmp, 0, 0);
-  return new Promise((ok) => c.toBlob((b) => ok(b ?? blob), "image/jpeg", 0.92));
+  if (mirrored) {
+    ctx.translate(c.width, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(src, r.x + (r.w - w) / 2, r.y + (r.h - h) / 2, w, h, 0, 0, c.width, c.height);
+  return new Promise<Blob | null>((ok) => c.toBlob(ok, "image/jpeg", 0.92));
+}
+
+/** Where `media` lands when it covers `box` (object-cover). */
+function coverRect(mw: number, mh: number, box: { x: number; y: number; w: number; h: number }) {
+  const s = Math.max(box.w / mw, box.h / mh);
+  return { x: box.x + (box.w - mw * s) / 2, y: box.y + (box.h - mh * s) / 2, w: mw * s, h: mh * s };
+}
+
+function useWindowSize() {
+  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+  useEffect(() => {
+    const on = () => setSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return size;
 }
 
 // Every iPhone browser is WebKit; Chrome on iOS says CriOS, not Chrome/.
@@ -71,7 +98,6 @@ export function Camera({
   onSettings: () => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
-  const backdrop = useRef<HTMLVideoElement>(null);
   const [focusAt, setFocusAt] = useState<{ x: number; y: number; n: number } | null>(null);
   const stream = useRef<MediaStream | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
@@ -83,6 +109,20 @@ export function Camera({
   const [recording, setRecording] = useState(false);
   const [flash, setFlash] = useState(false);
   const mirrored = facing === "user";
+  // The viewfinder: VIEW_ASPECT, as big as fits, centred; the same spot the editor shows
+  // the photo afterwards (contain), so nothing jumps after the shutter.
+  // (a landscape stream, like a laptop's webcam, gets a landscape viewfinder: photos are cropped the same way)
+  const win = useWindowSize();
+  const [landscape, setLandscape] = useState(false);
+  const card = landscape ? containRect(1 / VIEW_ASPECT, 1, win.w, win.h) : containRect(VIEW_ASPECT, 1, win.w, win.h);
+  // zoom: the camera's own when it has one (Chrome on Android), else digital (scale + crop)
+  const [zoom, setZoom] = useState(1);
+  const [showZoom, setShowZoom] = useState(false);
+  const zoomRange = useRef<{ min: number; max: number; native: boolean }>({ min: 1, max: MAX_DIGITAL_ZOOM, native: false });
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+  const pinchedAt = useRef(0);
+  const zoomTimer = useRef<number>();
 
   const gen = useRef(0);
   const stop = () => {
@@ -100,9 +140,11 @@ export function Camera({
       if (mine !== gen.current) return s.getTracks().forEach((t) => t.stop());
       stream.current = s;
       if (video.current) video.current.srcObject = s;
-      if (backdrop.current) backdrop.current.srcObject = s;
       const track = s.getVideoTracks()[0];
       setFocus(track, "continuous");
+      const z = (track.getCapabilities?.() as CamCaps | undefined)?.zoom;
+      zoomRange.current = z && z.max > z.min ? { min: z.min, max: Math.min(z.max, 10), native: true } : { min: 1, max: MAX_DIGITAL_ZOOM, native: false };
+      setZoom(zoomRange.current.min);
       // iOS ends the track when something else grabs the camera; come back instead of staying black
       track.addEventListener("ended", () => stream.current === s && start());
       setDenied(false);
@@ -130,20 +172,41 @@ export function Camera({
     setFacing(next);
   };
 
-  /** Last resort: copy the current preview frame at full stream resolution. */
-  const grabFrame = (v: HTMLVideoElement) =>
-    new Promise<Blob | null>((ok) => {
-      const c = document.createElement("canvas");
-      c.width = v.videoWidth;
-      c.height = v.videoHeight;
-      const ctx = c.getContext("2d")!;
-      if (mirrored) {
-        ctx.translate(c.width, 0);
-        ctx.scale(-1, 1);
-      }
-      ctx.drawImage(v, 0, 0);
-      c.toBlob(ok, "image/jpeg", 0.92);
-    });
+  const digital = () => (zoomRange.current.native ? 1 : zoom);
+
+  const zoomTo = (z: number) => {
+    const { min, max, native } = zoomRange.current;
+    z = Math.min(max, Math.max(min, z));
+    setZoom(z);
+    setShowZoom(true);
+    clearTimeout(zoomTimer.current);
+    zoomTimer.current = window.setTimeout(() => setShowZoom(false), 900);
+    const track = stream.current?.getVideoTracks()[0];
+    if (native && track) track.applyConstraints({ advanced: [{ zoom: z } as MediaTrackConstraintSet] }).catch(() => {});
+  };
+
+  // two fingers anywhere on the viewfinder zoom; the pager ignores multi-touch
+  const pointerDown = (e: React.PointerEvent) => {
+    if (e.isPrimary) pointers.current.clear();
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      pinch.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), zoom };
+    }
+  };
+  const pointerMove = (e: React.PointerEvent) => {
+    if (!pointers.current.has(e.pointerId)) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const p = pinch.current;
+    if (!p || pointers.current.size !== 2 || !p.dist) return;
+    const [a, b] = [...pointers.current.values()];
+    pinchedAt.current = Date.now();
+    zoomTo(p.zoom * (Math.hypot(a.x - b.x, a.y - b.y) / p.dist));
+  };
+  const pointerUp = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+  };
 
   const photo = async () => {
     const v = video.current;
@@ -167,12 +230,16 @@ export function Camera({
           return ic.takePhoto(max).catch(() => ic.takePhoto());
         })();
         blob = await Promise.race([shot, new Promise<null>((ok) => setTimeout(() => ok(null), 3000))]);
-        if (blob && mirrored) blob = await mirror(blob);
+        if (blob) {
+          const bmp = await createImageBitmap(blob);
+          blob = await shape(bmp, bmp.width, bmp.height, digital(), mirrored);
+        }
       } catch {
         blob = null;
       }
     }
-    if (!blob && v.videoWidth) blob = await grabFrame(v);
+    // last resort: the current preview frame at full stream resolution
+    if (!blob && v.videoWidth) blob = await shape(v, v.videoWidth, v.videoHeight, digital(), mirrored);
     if (blob) onCapture({ blob, kind: "photo", url: URL.createObjectURL(blob) });
   };
 
@@ -180,10 +247,15 @@ export function Camera({
     const track = stream.current?.getVideoTracks()[0];
     const v = video.current;
     if (!track || !v) return;
-    // tap point -> 0..1 in the frame (which is letterboxed with object-contain)
-    const r = containRect(v.videoWidth, v.videoHeight, v.clientWidth, v.clientHeight);
-    let x = (e.clientX - r.x) / r.w;
-    const y = (e.clientY - r.y) / r.h;
+    // tap point -> 0..1 in the frame, which covers the viewfinder (and is scaled by digital zoom)
+    const cx = card.x + card.w / 2;
+    const cy = card.y + card.h / 2;
+    if (Math.abs(e.clientX - cx) > card.w / 2 || Math.abs(e.clientY - cy) > card.h / 2) return;
+    const px = cx + (e.clientX - cx) / digital();
+    const py = cy + (e.clientY - cy) / digital();
+    const r = coverRect(v.videoWidth, v.videoHeight, card);
+    let x = (px - r.x) / r.w;
+    const y = (py - r.y) / r.h;
     if (x < 0 || x > 1 || y < 0 || y > 1) return;
     if (mirrored) x = 1 - x;
     setFocusAt({ x: e.clientX, y: e.clientY, n: Date.now() });
@@ -270,34 +342,41 @@ export function Camera({
 
   return (
     <div
-      className="relative h-full w-full overflow-hidden bg-black"
+      className="relative h-full w-full touch-none overflow-hidden bg-black"
+      onPointerDown={pointerDown}
+      onPointerMove={pointerMove}
+      onPointerUp={pointerUp}
+      onPointerCancel={pointerUp}
       onClick={(e) => {
         // tap to focus, double tap anywhere on the viewfinder flips the camera
-        if (e.target !== e.currentTarget && e.target !== video.current && e.target !== backdrop.current) return;
+        if (e.target !== e.currentTarget && e.target !== video.current) return;
         const t = Date.now();
+        // the end of a pinch isn't a tap
+        if (t - pinchedAt.current < 400) return;
         if (t - lastTap.current < 300) flip();
         else tapFocus(e);
         lastTap.current = t;
       }}
     >
-      {/* the whole frame, uncropped, on a blurred copy of itself */}
-      <video
-        ref={backdrop}
-        autoPlay
-        playsInline
-        muted
-        aria-hidden
-        className="absolute inset-0 h-full w-full scale-110 object-cover opacity-50 blur-2xl"
-        style={{ transform: mirrored ? "scaleX(-1.1) scaleY(1.1)" : undefined }}
-      />
-      <video
-        ref={video}
-        autoPlay
-        playsInline
-        muted
-        className="absolute inset-0 h-full w-full object-contain"
-        style={{ transform: mirrored ? "scaleX(-1)" : undefined }}
-      />
+      {/* the viewfinder: the frame, cropped a little, in a rounded card */}
+      <div className="pointer-events-none absolute overflow-hidden" style={{ left: card.x, top: card.y, width: card.w, height: card.h, borderRadius: RADIUS }}>
+        <video
+          ref={video}
+          autoPlay
+          playsInline
+          muted
+          className="pointer-events-auto h-full w-full object-cover"
+          onLoadedMetadata={(e) => setLandscape(e.currentTarget.videoWidth > e.currentTarget.videoHeight)}
+          onResize={(e) => setLandscape(e.currentTarget.videoWidth > e.currentTarget.videoHeight)}
+          style={{ transform: `scale(${mirrored ? -digital() : digital()}, ${digital()})` }}
+        />
+      </div>
+      <div
+        className={`pointer-events-none absolute flex justify-center transition-opacity duration-200 ${showZoom ? "opacity-100" : "opacity-0"}`}
+        style={{ left: card.x, width: card.w, top: card.y + 16 }}
+      >
+        <span className="rounded-full bg-black/55 px-3 py-1.5 text-base font-black text-white">{(zoom / zoomRange.current.min).toFixed(1)}×</span>
+      </div>
 
       {focusAt && (
         <div

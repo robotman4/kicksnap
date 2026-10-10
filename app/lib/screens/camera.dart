@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -8,10 +7,11 @@ import 'package:image_picker/image_picker.dart';
 import '../models.dart';
 import '../store.dart';
 import '../ui.dart';
+import 'compose.dart';
 
 /// What the shutter (or the gallery) produced.
 class Capture {
-  Capture(this.path, this.kind, {this.mirror = false, this.fromGallery = false});
+  Capture(this.path, this.kind, {this.mirror = false, this.fromGallery = false, this.crop});
   final String path;
 
   /// photo | video
@@ -20,13 +20,17 @@ class Capture {
   /// front camera: show and send it the way the preview looked
   final bool mirror;
   final bool fromGallery;
+
+  /// photos from the camera: crop to this aspect (see viewAspect), like the viewfinder showed
+  final double? crop;
 }
 
 const _maxVideo = Duration(seconds: 10);
 const _hold = Duration(milliseconds: 220);
 
-/// The camera page: full sensor frame, tap to focus, double tap to flip,
-/// tap the shutter for a photo, hold it for up to 10 s of video.
+/// The camera page: a rounded viewfinder (the sensor frame, cropped a little to viewAspect),
+/// tap to focus, double tap to flip, pinch to zoom, tap the shutter for a photo, hold it for
+/// up to 10 s of video.
 class Camera extends StatefulWidget {
   const Camera({super.key, required this.me, required this.active, required this.unread, required this.onCapture, required this.onChats, required this.onFriends, required this.onSettings});
   final User me;
@@ -51,6 +55,12 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
   int focusN = 0;
   DateTime lastTap = DateTime(0);
   int gen = 0;
+  double zoom = 1, minZoom = 1, maxZoom = 1, pinchFrom = 1;
+  double? wantZoom;
+  bool zoomBusy = false;
+  bool showZoom = false;
+  Timer? zoomTimer;
+  DateTime pinchedAt = DateTime(0);
   late final ring = AnimationController(vsync: this, duration: _maxVideo);
 
   @override
@@ -80,6 +90,7 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     WidgetsBinding.instance.removeObserver(this);
     holdTimer?.cancel();
     stopTimer?.cancel();
+    zoomTimer?.cancel();
     ring.dispose();
     stop();
     super.dispose();
@@ -102,6 +113,14 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
       cam = c;
       c.setFocusMode(FocusMode.auto).catchError((_) {});
       c.setFlashMode(FlashMode.off).catchError((_) {});
+      try {
+        minZoom = await c.getMinZoomLevel();
+        maxZoom = (await c.getMaxZoomLevel()).clamp(minZoom, 10.0).toDouble();
+      } catch (_) {
+        minZoom = maxZoom = 1;
+      }
+      if (mine != gen || !mounted) return;
+      zoom = minZoom;
       setState(() => denied = false);
     } on CameraException catch (_) {
       if (mine == gen && mounted) setState(() => denied = true);
@@ -138,7 +157,7 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     try {
       // a real still from the sensor: full resolution, autofocused
       final f = await c.takePicture();
-      widget.onCapture(Capture(f.path, 'photo', mirror: front));
+      widget.onCapture(Capture(f.path, 'photo', mirror: front, crop: viewAspect));
     } catch (_) {}
   }
 
@@ -198,8 +217,38 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     widget.onCapture(Capture(f.path, video ? 'video' : 'photo', fromGallery: true));
   }
 
+  void pinchStart(ScaleStartDetails d) => pinchFrom = zoom;
+
+  void pinch(ScaleUpdateDetails d) {
+    if (d.pointerCount < 2 || cam == null || maxZoom <= minZoom) return;
+    pinchedAt = DateTime.now();
+    final z = (pinchFrom * d.scale).clamp(minZoom, maxZoom).toDouble();
+    if ((z - zoom).abs() < .01) return;
+    zoomTimer?.cancel();
+    setState(() {
+      zoom = z;
+      showZoom = true;
+    });
+    zoomTimer = Timer(const Duration(milliseconds: 900), () => mounted ? setState(() => showZoom = false) : null);
+    wantZoom = z;
+    if (!zoomBusy) pushZoom();
+  }
+
+  /// One zoom call at a time: the plugin is async and a pinch fires many updates.
+  Future<void> pushZoom() async {
+    final c = cam, z = wantZoom;
+    if (c == null || z == null) return;
+    wantZoom = null;
+    zoomBusy = true;
+    await c.setZoomLevel(z).catchError((_) {});
+    zoomBusy = false;
+    if (wantZoom != null && mounted) pushZoom();
+  }
+
   void tap(TapUpDetails d, Size box) {
     final now = DateTime.now();
+    // the end of a pinch isn't a tap
+    if (now.difference(pinchedAt) < const Duration(milliseconds: 300)) return;
     // double tap anywhere on the viewfinder flips the camera
     if (now.difference(lastTap) < const Duration(milliseconds: 300)) {
       lastTap = DateTime(0);
@@ -208,8 +257,10 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     lastTap = now;
     final c = cam;
     if (c == null || !c.value.isInitialized) return;
-    // tap point -> 0..1 in the frame, which is letterboxed (contain)
-    final r = _contain(_frameSize(c), box);
+    // tap point -> 0..1 in the frame, which fills the viewfinder (cover)
+    final card = viewfinder(box);
+    if (!card.contains(d.localPosition)) return;
+    final r = _cover(_frameSize(c), card);
     var x = (d.localPosition.dx - r.left) / r.width;
     final y = (d.localPosition.dy - r.top) / r.height;
     if (x < 0 || x > 1 || y < 0 || y > 1) return;
@@ -229,22 +280,41 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     final ready = c != null && c.value.isInitialized;
     return LayoutBuilder(builder: (context, box) {
       final size = box.biggest;
+      final card = viewfinder(size);
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTapUp: (d) => tap(d, size),
+        // one finger still swipes between pages: the pager wins a plain drag before this does
+        onScaleStart: pinchStart,
+        onScaleUpdate: pinch,
         child: Stack(fit: StackFit.expand, children: [
           const ColoredBox(color: Colors.black),
-          if (ready) ...[
-            // the whole frame, uncropped, on a blurred copy of itself
-            Opacity(
-              opacity: .5,
-              child: ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+          if (ready)
+            Positioned.fromRect(
+              rect: card,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(viewRadius),
                 child: FittedBox(fit: BoxFit.cover, clipBehavior: Clip.hardEdge, child: _preview(c)),
               ),
             ),
-            FittedBox(fit: BoxFit.contain, child: _preview(c)),
-          ],
+          Positioned(
+            left: card.left,
+            width: card.width,
+            top: card.top + 16,
+            child: IgnorePointer(
+              child: Center(
+                child: AnimatedOpacity(
+                  opacity: showZoom ? 1 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(99)),
+                    child: Text('${(zoom / minZoom).toStringAsFixed(1)}×', style: font(16, weight: FontWeight.w900)),
+                  ),
+                ),
+              ),
+            ),
+          ),
           if (focusAt != null)
             Positioned(
               key: ValueKey(focusN),
@@ -355,6 +425,12 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
   }
 }
 
+const viewRadius = 24.0;
+
+/// Where the viewfinder sits: viewAspect, as big as fits, centred. That's the same spot the
+/// editor shows the photo afterwards (contain), so nothing jumps after the shutter.
+Rect viewfinder(Size box) => _contain(const Size(viewAspect, 1), box);
+
 /// Preview size in portrait (the plugin reports it landscape).
 Size _frameSize(CameraController c) {
   final s = c.value.previewSize ?? const Size(4, 3);
@@ -365,6 +441,12 @@ Rect _contain(Size media, Size box) {
   final k = (box.width / media.width).clamp(0, box.height / media.height).toDouble();
   final w = media.width * k, h = media.height * k;
   return Rect.fromLTWH((box.width - w) / 2, (box.height - h) / 2, w, h);
+}
+
+Rect _cover(Size media, Rect box) {
+  final k = box.width / media.width > box.height / media.height ? box.width / media.width : box.height / media.height;
+  final w = media.width * k, h = media.height * k;
+  return Rect.fromLTWH(box.left + (box.width - w) / 2, box.top + (box.height - h) / 2, w, h);
 }
 
 class _Shutter extends StatelessWidget {
