@@ -9,7 +9,7 @@ Camera-first ephemeral messaging. Self-hosted server, web PWA, native Flutter ap
 - `frontend/`: React + Vite PWA. `npm run build` type-checks. E2E code in `src/crypto.ts`, `src/e2e.ts`.
 - `app/`: Flutter app (Android now, iOS later), package `kiks`, app ID `com.getkiks.app`. See `app/README.md`.
 - `docs/e2e.md` + `docs/e2e-vectors.json`: the E2E protocol both clients implement.
-- `.github/workflows/ci.yml` (backend, frontend, image) and `android.yml` (APK).
+- `.github/workflows/ci.yml` (backend, frontend, image) `android.yml` (APK) and `ios.yml` (unsigned iOS compile on macOS).
 
 ## Rules
 
@@ -29,4 +29,6 @@ Camera-first ephemeral messaging. Self-hosted server, web PWA, native Flutter ap
 - Interop test: run the backend on :8765 and `KIKS_TEST_SERVER=http://127.0.0.1:8765 flutter test`.
 - Signing: `android/app/kiks-dev.keystore` (public, test builds only) unless `android/key.properties` exists
   (CI writes it from `KIKS_KEYSTORE_*` secrets).
+- iOS: bundle id `com.getkiks.app`, iOS 15+. No Mac in the sandbox: CI's `ios` job is the only iOS compile check.
+  Signing/TestFlight happen on Kim's Mac (steps in `app/README.md`).
 - No push yet (needs Firebase/APNs, see `app/README.md`). Passkeys and admin stay web-only.

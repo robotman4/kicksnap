@@ -88,29 +88,52 @@ What it takes (plan section 1, "Push: the real cost"):
 Send me the go-ahead plus the two Firebase files (out of git) and I'll wire it up. UnifiedPush (ntfy) for
 de-Googled phones can come after.
 
-## iPhone (later, on the Mac)
+## iPhone (on the Mac)
 
-The code already builds for iOS; it hasn't been run on a device yet. On the Mac:
+The same code builds for iOS; CI (workflow **ios**) compiles it unsigned on every push, so a red **ios** run
+means something broke for iPhone. It hasn't run on a real iPhone yet.
+
+What the Apple account gets you:
+
+| | free Apple ID | paid developer account ($99/year) |
+|---|---|---|
+| Run on your own iPhone | yes, re-install every 7 days | yes, 1 year |
+| TestFlight / App Store | no | yes |
+| Push notifications (APNs) | no | yes |
+
+One-time setup:
 
 ```bash
-brew install --cask flutter        # or the SDK zip from flutter.dev, version 3.47
-xcode-select --install && sudo xcodebuild -runFirstLaunch   # Xcode from the App Store first
-brew install cocoapods
-cd app && flutter pub get && cd ios && pod install && cd ..
+# Xcode from the App Store first, open it once, accept the license, install the iOS platform it offers
+sudo xcode-select -s /Applications/Xcode.app && sudo xcodebuild -runFirstLaunch
+brew install --cask flutter                # check: flutter --version shows 3.47.x
+brew install cocoapods                     # only used if a plugin isn't on Swift Package Manager yet
+flutter doctor                             # Xcode section should be green
+git clone https://github.com/robotman4/kicksnap && cd kicksnap/app
+flutter pub get
 open ios/Runner.xcworkspace
 ```
 
-In Xcode: Runner target → Signing & Capabilities → Team = your Apple ID (free) or the paid team. With a free
-Apple ID the build runs on your own iPhone for 7 days. iPhone: Settings → Privacy & Security → Developer Mode
-on, and trust the developer under General → VPN & Device Management. Then `flutter run --release` with the
-phone plugged in.
+In Xcode: click **Runner** (top of the left panel) → target **Runner** → **Signing & Capabilities** →
+tick *Automatically manage signing* → **Team**: add your Apple ID (Xcode → Settings → Accounts) and pick it.
+With a free Apple ID the bundle id `com.getkiks.app` may already be taken by another free team; if Xcode says so,
+change it locally to e.g. `com.getkiks.app.kim` (don't commit that).
 
-TestFlight (needs the $99/year account): create the app in App Store Connect with bundle id `com.getkiks.app`,
-then `flutter build ipa` and upload `build/ios/ipa/*.ipa` with Transporter. Answer the export-compliance
-question (the app uses standard encryption for end-to-end messaging).
+On the iPhone: plug it in, trust the Mac, then Settings → Privacy & Security → **Developer Mode** on (it restarts).
 
-Known iOS gaps to check on the first run: videos from Android Chrome (WebM) don't play on iPhone (Android app
-and iPhone record MP4, which plays everywhere); screenshots can't be blocked on iOS, only on Android.
+```bash
+flutter run --release                                  # builds, installs and starts it on the plugged-in phone
+flutter run --release --dart-define=KIKS_SERVER=https://kiks.example.com
+```
+
+First start: General → VPN & Device Management → trust your developer certificate, then open Kiks again.
+
+TestFlight (paid account): App Store Connect → My Apps → + → new app, bundle id `com.getkiks.app`. Then
+`flutter build ipa --build-number=<n>` and upload `build/ios/ipa/*.ipa` with the Transporter app. Export
+compliance: the app uses standard encryption (end-to-end messaging), which needs no separate documentation.
+
+Known iOS gaps to check on the first run: videos recorded by Chrome on Android with the web app (WebM) don't
+play on iPhone (the native apps record MP4, which plays everywhere); screenshots can't be blocked on iOS.
 
 ## Not in the app (use the web app)
 
