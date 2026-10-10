@@ -25,11 +25,12 @@ class Stroke {
 }
 
 /// Text styles, in the order tapping T cycles through them: the full-width bar, then the
-/// free ones (bold outline, colour pill, soft shadow) that move with a drag and resize with a pinch.
+/// free ones (bold outline, colour pill, soft shadow) that move with a drag, and resize and
+/// rotate with two fingers.
 const textStyles = ['bar', 'big', 'pill', 'soft'];
 
 class TextLabel {
-  TextLabel({this.text = '', this.style = 'bar', required this.color, this.x = .5, required this.y, this.scale = 1});
+  TextLabel({this.text = '', this.style = 'bar', required this.color, this.x = .5, required this.y, this.scale = 1, this.rotation = 0});
   String text;
   String style;
   Color color;
@@ -37,6 +38,9 @@ class TextLabel {
 
   /// pinch size of the free styles
   double scale;
+
+  /// two-finger twist of the free styles, radians clockwise
+  double rotation;
   bool get free => style != 'bar';
 }
 
@@ -137,14 +141,17 @@ void paintLabel(Canvas canvas, TextLabel l, Size screen, Rect r) {
   }
   // the free styles are one line, centred on their spot, as wide as the text
   final f = tp(labelStyle(l, size));
-  final c = Offset(l.x * screen.width, y);
-  final at = c - Offset(f.width / 2, f.height / 2);
+  canvas.save();
+  canvas.translate(l.x * screen.width, y);
+  canvas.rotate(l.rotation);
+  final at = Offset(-f.width / 2, -f.height / 2);
   if (l.style == 'pill') {
-    final box = Rect.fromCenter(center: c, width: f.width + size * pillPadX * 2, height: f.height + size * pillPadY * 2);
+    final box = Rect.fromCenter(center: Offset.zero, width: f.width + size * pillPadX * 2, height: f.height + size * pillPadY * 2);
     canvas.drawRRect(RRect.fromRectAndRadius(box, Radius.circular(size * pillRadius)), Paint()..color = l.color);
   }
   if (l.style == 'big') tp(labelStyle(l, size, stroke: labelOutline(l, size))).paint(canvas, at);
   f.paint(canvas, at);
+  canvas.restore();
 }
 
 String videoMime(String path) {

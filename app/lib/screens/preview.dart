@@ -44,7 +44,7 @@ class _PreviewState extends State<Preview> {
   Size dims = Size.zero;
   VideoPlayerController? video;
   bool sending = false;
-  double pinchFrom = 1;
+  double pinchFrom = 1, twistFrom = 0;
 
   bool get isVideo => widget.capture.kind == 'video';
 
@@ -138,13 +138,19 @@ class _PreviewState extends State<Preview> {
     return key.substring(2);
   }
 
-  /// Two fingers anywhere resize the free text; dragging it is on the text itself.
-  void pinchStart(ScaleStartDetails d) => pinchFrom = label?.scale ?? 1;
+  /// Two fingers anywhere resize and rotate the free text; dragging it is on the text itself.
+  void pinchStart(ScaleStartDetails d) {
+    pinchFrom = label?.scale ?? 1;
+    twistFrom = label?.rotation ?? 0;
+  }
 
   void pinch(ScaleUpdateDetails d) {
     final l = label;
     if (l == null || !l.free || d.pointerCount < 2) return;
-    setState(() => l.scale = (pinchFrom * d.scale).clamp(minScale, maxScale));
+    setState(() {
+      l.scale = (pinchFrom * d.scale).clamp(minScale, maxScale);
+      l.rotation = twistFrom + d.rotation;
+    });
   }
 
   @override
@@ -384,13 +390,16 @@ class _PreviewState extends State<Preview> {
     }
 
     final child = GestureDetector(
-      onScaleStart: typing ? null : (d) => pinchFrom = l.scale,
+      onScaleStart: typing ? null : pinchStart,
       onScaleUpdate: typing
           ? null
           : (d) => setState(() {
                 l.x = (l.x + d.focalPointDelta.dx / screen.width).clamp(l.free ? 0 : .05, l.free ? 1 : .95);
                 l.y = (l.y + d.focalPointDelta.dy / screen.height).clamp(.05, .95);
-                if (l.free && d.pointerCount >= 2) l.scale = (pinchFrom * d.scale).clamp(minScale, maxScale);
+                if (l.free && d.pointerCount >= 2) {
+                  l.scale = (pinchFrom * d.scale).clamp(minScale, maxScale);
+                  l.rotation = twistFrom + d.rotation;
+                }
               }),
       onTap: typing ? null : () => tapText(screen),
       child: switch (l.style) {
@@ -414,12 +423,13 @@ class _PreviewState extends State<Preview> {
       final y = typing && kb > 0 ? screen.height - kb - 24 - size : l.y * screen.height;
       return Positioned(top: y - size, left: r.left, child: child);
     }
+    // straight while typing, so the field is easy to edit
     if (typing && kb > 0) return Positioned(left: 0, right: 0, bottom: kb + 24, child: Center(child: child));
     // centred on its spot, as wide as the text (can run off the edges, like the output)
     return Positioned(
       left: l.x * screen.width,
       top: l.y * screen.height,
-      child: FractionalTranslation(translation: const Offset(-.5, -.5), child: child),
+      child: FractionalTranslation(translation: const Offset(-.5, -.5), child: typing ? child : Transform.rotate(angle: l.rotation, child: child)),
     );
   }
 }

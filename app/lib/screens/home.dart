@@ -155,6 +155,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   /// something full-screen is on top of the pager (editor, viewer, thread...)
   int covered = 0;
 
+  /// two fingers on the camera: it's a zoom, so the pager holds still
+  bool pinching = false;
+
   @override
   void initState() {
     super.initState();
@@ -264,6 +267,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
           builder: (context, _) => Stack(children: [
             PageView.builder(
               controller: pager,
+              physics: pinching ? const NeverScrollableScrollPhysics() : null,
               onPageChanged: (i) => setState(() => page = i % 3),
               itemBuilder: (_, i) => switch (i % 3) {
                 _chats => Chats(
@@ -287,6 +291,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                     onChats: () => go(_chats),
                     onFriends: () => go(_friends),
                     onSettings: settings,
+                    onPinch: (on) => setState(() => pinching = on),
                   ),
                 _ => Friends(model: model, onSnap: (n) => snapAt('u:$n')),
               },

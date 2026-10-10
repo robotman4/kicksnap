@@ -35,12 +35,15 @@ const _hold = Duration(milliseconds: 220);
 /// tap to focus, double tap to flip, pinch to zoom, tap the shutter for a photo, hold it for
 /// video, up to the server's limit (30 s by default).
 class Camera extends StatefulWidget {
-  const Camera({super.key, required this.me, required this.active, required this.unread, required this.onCapture, required this.onChats, required this.onFriends, required this.onSettings});
+  const Camera({super.key, required this.me, required this.active, required this.unread, required this.onCapture, required this.onChats, required this.onFriends, required this.onSettings, this.onPinch});
   final User me;
   final bool active;
   final int unread;
   final void Function(Capture) onCapture;
   final VoidCallback onChats, onFriends, onSettings;
+
+  /// a second finger came down (true) / all fingers are up again (false)
+  final ValueChanged<bool>? onPinch;
   @override
   State<Camera> createState() => _CameraState();
 }
@@ -64,6 +67,43 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
   bool showZoom = false;
   Timer? zoomTimer;
   DateTime pinchedAt = DateTime(0);
+  final fingers = <int, Offset>{};
+  bool pinching = false;
+  double pinchDist = 0;
+
+  // Pinch is read from raw pointers, outside the gesture arena, so it works whichever way the
+  // fingers move (two thumbs side to side too). As soon as a second finger lands the pager is
+  // told to hold still, and a swipe it had started snaps back.
+  double get spread {
+    final p = fingers.values.take(2).toList();
+    return (p[0] - p[1]).distance;
+  }
+
+  void fingerDown(PointerDownEvent e) {
+    fingers[e.pointer] = e.localPosition;
+    if (fingers.length == 2) {
+      pinchDist = spread;
+      pinchFrom = zoom;
+      if (!pinching) {
+        pinching = true;
+        widget.onPinch?.call(true);
+      }
+    }
+  }
+
+  void fingerMove(PointerMoveEvent e) {
+    if (!fingers.containsKey(e.pointer)) return;
+    fingers[e.pointer] = e.localPosition;
+    if (fingers.length == 2 && pinchDist > 0) pinch(spread / pinchDist);
+  }
+
+  void fingerUp(PointerEvent e) {
+    fingers.remove(e.pointer);
+    if (fingers.isEmpty && pinching) {
+      pinching = false;
+      widget.onPinch?.call(false);
+    }
+  }
   late final ring = AnimationController(vsync: this, duration: _maxVideo);
 
   @override
@@ -228,12 +268,10 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     widget.onCapture(Capture(f.path, video ? 'video' : 'photo', fromGallery: true));
   }
 
-  void pinchStart(ScaleStartDetails d) => pinchFrom = zoom;
-
-  void pinch(ScaleUpdateDetails d) {
-    if (d.pointerCount < 2 || cam == null || maxZoom <= minZoom) return;
+  void pinch(double scale) {
+    if (cam == null || maxZoom <= minZoom) return;
     pinchedAt = DateTime.now();
-    final z = (pinchFrom * d.scale).clamp(minZoom, maxZoom).toDouble();
+    final z = (pinchFrom * scale).clamp(minZoom, maxZoom).toDouble();
     if ((z - zoom).abs() < .01) return;
     zoomTimer?.cancel();
     setState(() {
@@ -309,12 +347,14 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
     return LayoutBuilder(builder: (context, box) {
       final size = box.biggest;
       final card = viewfinder(size);
-      return GestureDetector(
+      return Listener(
+        onPointerDown: fingerDown,
+        onPointerMove: fingerMove,
+        onPointerUp: fingerUp,
+        onPointerCancel: fingerUp,
+        child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTapUp: (d) => tap(d, size),
-        // one finger still swipes between pages: the pager wins a plain drag before this does
-        onScaleStart: pinchStart,
-        onScaleUpdate: pinch,
         child: Stack(fit: StackFit.expand, children: [
           const ColoredBox(color: Colors.black),
           if (ready)
@@ -442,6 +482,7 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
             ),
           ),
         ]),
+        ),
       );
     });
   }

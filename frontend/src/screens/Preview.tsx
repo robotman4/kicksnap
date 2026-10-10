@@ -14,10 +14,11 @@ import { Capture } from "./Camera";
 type Pt = [number, number];
 type Stroke = { color: string; width: number; pts: Pt[] };
 // Text styles, in the order tapping T cycles through them: the full-width bar, then the
-// free ones (bold outline, colour pill, soft shadow) that move with a drag and resize with a pinch.
+// free ones (bold outline, colour pill, soft shadow) that move with a drag, and resize and rotate with two fingers.
 type TextStyle = "bar" | "big" | "pill" | "soft";
 const STYLES: TextStyle[] = ["bar", "big", "pill", "soft"];
-type Label = { text: string; style: TextStyle; color: string; x: number; y: number; scale: number };
+// rotation: two-finger twist of the free styles, radians clockwise
+type Label = { text: string; style: TextStyle; color: string; x: number; y: number; scale: number; rotation: number };
 const free = (l: Label) => l.style !== "bar";
 
 const INKS = ["#FFFFFF", "#000000", "#FF3D5A", "#FF8A3D", "#FFE14D", "#C6FF3D", "#3DD9FF", "#7C5CFF", "#FF5CD6"];
@@ -61,12 +62,16 @@ function drawLabel(ctx: CanvasRenderingContext2D, l: Label, w: number, h: number
     return;
   }
   // the free styles are one line, centred on their spot, as wide as the text
+  const k = ctx.getTransform().a;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(l.rotation);
   if (l.style === "pill") {
     const bw = ctx.measureText(l.text).width + size * PILL.x * 2;
     const bh = size * (PILL.line + PILL.y * 2);
     ctx.fillStyle = l.color;
     ctx.beginPath();
-    ctx.roundRect(x - bw / 2, y - bh / 2, bw, bh, size * PILL.r);
+    ctx.roundRect(-bw / 2, -bh / 2, bw, bh, size * PILL.r);
     ctx.fill();
     ctx.fillStyle = onColor(l.color);
   } else {
@@ -76,17 +81,17 @@ function drawLabel(ctx: CanvasRenderingContext2D, l: Label, w: number, h: number
     ctx.lineWidth = size * 0.14;
     ctx.lineJoin = "round";
     ctx.strokeStyle = outlineFor(l.color);
-    ctx.strokeText(l.text, x, y);
+    ctx.strokeText(l.text, 0, 0);
   }
   if (l.style === "soft") {
-    // shadows ignore the canvas transform, so scale them by hand
-    const k = ctx.getTransform().a;
+    // shadows ignore the canvas transform, so scale and turn them by hand
     ctx.shadowColor = "rgba(0,0,0,.6)";
-    ctx.shadowOffsetY = size * 0.06 * k;
+    ctx.shadowOffsetX = -Math.sin(l.rotation) * size * 0.06 * k;
+    ctx.shadowOffsetY = Math.cos(l.rotation) * size * 0.06 * k;
     ctx.shadowBlur = size * 0.18 * k;
   }
-  ctx.fillText(l.text, x, y);
-  ctx.shadowColor = "transparent";
+  ctx.fillText(l.text, 0, 0);
+  ctx.restore();
 }
 
 const MAX_SIDE = 4096;
@@ -168,7 +173,7 @@ export function Preview({
   const dragText = useRef<{ dx: number; dy: number; moved: boolean } | null>(null);
   // two fingers anywhere resize the free text
   const fingers = useRef(new Map<number, Pt>());
-  const pinch = useRef<{ dist: number; scale: number } | null>(null);
+  const pinch = useRef<{ dist: number; angle: number; scale: number; rotation: number } | null>(null);
   const pinchedAt = useRef(0);
 
   // redraw strokes whenever they change
@@ -215,7 +220,7 @@ export function Preview({
     }
     // start text in the lower part of the photo itself, not on the blurred fill
     const y = (rect.y + rect.h * 0.75) / window.innerHeight;
-    setLabel((l) => l ?? { text: "", style: "bar", color: ink, x: 0.5, y, scale: 1 });
+    setLabel((l) => l ?? { text: "", style: "bar", color: ink, x: 0.5, y, scale: 1, rotation: 0 });
     setMode("text");
   };
 
@@ -229,7 +234,9 @@ export function Preview({
     fingers.current.set(e.pointerId, rel(e));
     if (fingers.current.size === 2 && mode === "look" && label && free(label)) {
       const [a, b] = [...fingers.current.values()];
-      pinch.current = { dist: Math.hypot((a[0] - b[0]) * window.innerWidth, (a[1] - b[1]) * window.innerHeight), scale: label.scale };
+      const dx = (b[0] - a[0]) * window.innerWidth;
+      const dy = (b[1] - a[1]) * window.innerHeight;
+      pinch.current = { dist: Math.hypot(dx, dy), angle: Math.atan2(dy, dx), scale: label.scale, rotation: label.rotation };
       dragText.current = null;
     }
   };
@@ -239,9 +246,17 @@ export function Preview({
     const p = pinch.current;
     if (!p || fingers.current.size !== 2 || !p.dist) return;
     const [a, b] = [...fingers.current.values()];
-    const dist = Math.hypot((a[0] - b[0]) * window.innerWidth, (a[1] - b[1]) * window.innerHeight);
+    const dx = (b[0] - a[0]) * window.innerWidth;
+    const dy = (b[1] - a[1]) * window.innerHeight;
     pinchedAt.current = Date.now();
-    setLabel((l) => l && { ...l, scale: Math.min(SCALE.max, Math.max(SCALE.min, (p.scale * dist) / p.dist)) });
+    setLabel(
+      (l) =>
+        l && {
+          ...l,
+          scale: Math.min(SCALE.max, Math.max(SCALE.min, (p.scale * Math.hypot(dx, dy)) / p.dist)),
+          rotation: p.rotation + Math.atan2(dy, dx) - p.angle,
+        }
+    );
   };
   const pinchUp = (e: React.PointerEvent) => {
     fingers.current.delete(e.pointerId);
@@ -297,7 +312,7 @@ export function Preview({
       : {};
     const base: React.CSSProperties = { fontSize: size, fontWeight: WEIGHT[l.style], top: `${l.y * 100}%` };
     if (l.style === "bar") return { ...base, left: rect.x, width: rect.w, transform: "translateY(-50%)", ...spot };
-    const at: React.CSSProperties = { ...base, left: `${l.x * 100}%`, transform: "translate(-50%,-50%)", color: l.color };
+    const at: React.CSSProperties = { ...base, left: `${l.x * 100}%`, transform: `translate(-50%,-50%) rotate(${l.rotation}rad)`, color: l.color };
     const look: React.CSSProperties =
       l.style === "big"
         ? { WebkitTextStroke: `${size * 0.14}px ${outlineFor(l.color)}`, paintOrder: "stroke fill" }
