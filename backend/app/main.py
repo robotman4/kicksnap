@@ -57,7 +57,9 @@ async def security_headers(request, call_next):
             "script-src 'self'",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob:",
-            "media-src 'self' blob:",
+            # WebKit checks a camera stream on a <video> (srcObject) against media-src as mediastream:,
+            # so without it the QR scanner and camera are black in Safari / the iOS PWA
+            "media-src 'self' blob: mediastream:",
             f"connect-src 'self' wss://{host} ws://{host}",
             "worker-src 'self'",
             "manifest-src 'self'",

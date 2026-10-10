@@ -168,6 +168,13 @@ def test_pages_cant_be_framed(client):
     assert client.get("/api/v1/health").headers["x-frame-options"] == "DENY"
 
 
+def test_web_app_csp_lets_the_camera_play(client):
+    # Safari treats a getUserMedia stream on a <video> as a mediastream: source
+    csp = client.get("/").headers["content-security-policy"]
+    media = next(d for d in csp.split("; ") if d.startswith("media-src"))
+    assert "mediastream:" in media and "blob:" in media
+
+
 def test_removed_device_loses_its_socket(new_user):
     from starlette.websockets import WebSocketDisconnect
 
