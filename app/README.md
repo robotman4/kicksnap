@@ -94,7 +94,7 @@ de-Googled phones can come after.
 ## iPhone (on the Mac)
 
 The same code builds for iOS; CI (workflow **ios**) compiles it unsigned on every push, so a red **ios** run
-means something broke for iPhone. It hasn't run on a real iPhone yet.
+means something broke for iPhone. Tested on a real iPhone (iOS 26): snaps go both ways with Android.
 
 What the Apple account gets you:
 
