@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 :root {
+  /* space under the camera/editor bottom bar: the home indicator mostly sits in it, and big
+     insets (some Android nav bars) are capped, so buttons stay near the bottom edge.
+     Same rule as barGap in app/lib/screens/compose.dart. */
+  --bar-gap: max(calc(min(env(safe-area-inset-bottom), 34px) - 16px), 8px);
   --accent: 198 255 61;
   --ink: 0 0 0;
   --paper: 255 255 255;

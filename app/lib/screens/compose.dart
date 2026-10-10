@@ -54,11 +54,15 @@ double labelSize(TextLabel l, double screenH) => fontSizes[l.style]! * screenH *
 
 /// Height of the bar under the picture (shutter on the camera, send on the editor), above the
 /// system's bottom inset.
-const bottomBar = 112.0;
+const bottomBar = 104.0;
+
+/// Space under that bar: the home indicator mostly sits in it, and big insets (some Android
+/// nav bars) are capped, so the buttons stay near the bottom edge. Same as --bar-gap in the PWA.
+double barGap(double padBottom) => (padBottom.clamp(0, 34) - 16).clamp(8, 34).toDouble();
 
 /// Where the camera's viewfinder and the editor's media go: the whole screen above the bottom bar.
 /// Camera photos are cropped to this shape, so the editor shows them in exactly the same spot.
-Rect mediaArea(Size screen, double padBottom) => Rect.fromLTWH(0, 0, screen.width, (screen.height - padBottom - bottomBar).clamp(1, double.infinity));
+Rect mediaArea(Size screen, double padBottom) => Rect.fromLTWH(0, 0, screen.width, (screen.height - barGap(padBottom) - bottomBar).clamp(1, double.infinity));
 
 /// The centre part of `full` in the shape of `aspect` (width / height), turned to follow the
 /// media's orientation (a photo taken sideways is cropped sideways).

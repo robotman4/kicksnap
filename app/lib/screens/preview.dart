@@ -244,7 +244,7 @@ class _PreviewState extends State<Preview> {
             Positioned(
               left: 16,
               right: 16,
-              bottom: pad.bottom + (bottomBar - 60) / 2,
+              bottom: barGap(pad.bottom) + 12,
               child: ValueListenableBuilder(
                 valueListenable: accent,
                 builder: (_, a, _) => Press(

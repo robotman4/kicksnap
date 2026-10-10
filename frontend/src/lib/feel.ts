@@ -66,14 +66,14 @@ export function containRect(nw: number, nh: number, W = window.innerWidth, H = w
 }
 
 /** Height of the bar under the picture (shutter on the camera, send in the editor), above the safe area. */
-export const BOTTOM_BAR = 112;
+export const BOTTOM_BAR = 104;
 
 let probe: HTMLDivElement | null = null;
-/** The bottom safe-area inset in px (the home indicator), read through CSS env(). */
-export function safeBottom() {
+/** The space under the bottom bar in px (--bar-gap in index.css, from the safe-area inset). */
+export function barGap() {
   if (!probe) {
     probe = document.createElement("div");
-    probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;padding-bottom:env(safe-area-inset-bottom)";
+    probe.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;padding-bottom:var(--bar-gap)";
     document.body.appendChild(probe);
   }
   return parseFloat(getComputedStyle(probe).paddingBottom) || 0;
@@ -84,7 +84,7 @@ export function safeBottom() {
  * Camera photos are cropped to this shape, so the editor shows them in exactly the same spot.
  */
 export function mediaArea(W = window.innerWidth, H = window.innerHeight): Rect {
-  return { x: 0, y: 0, w: W, h: Math.max(1, H - safeBottom() - BOTTOM_BAR) };
+  return { x: 0, y: 0, w: W, h: Math.max(1, H - barGap() - BOTTOM_BAR) };
 }
 
 /** A colour on the "your colour" hue bar (0..1): bright and a little soft, so it works as an accent. */

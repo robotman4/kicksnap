@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Media } from "../components/Media";
 import { Sheet } from "../components/Sheet";
-import { BOTTOM_BAR, buzz, containRect, mediaArea, onColor, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
+import { buzz, containRect, mediaArea, onColor, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
 import { applyLook, hasVignette, LookDefs, lookCss, LOOKS, luminance, SPECTRUM, spectrumAt, vignetteCss } from "../lib/looks";
 import { useVisualViewport } from "../lib/viewport";
 import { Capture } from "./Camera";
@@ -440,7 +440,7 @@ export function Preview({
 
       {mode === "look" && (
         // the send bar: full width, in the bar under the photo
-        <div className="absolute inset-x-0 bottom-0 px-4" style={{ paddingBottom: `calc(env(safe-area-inset-bottom) + ${(BOTTOM_BAR - 60) / 2}px)` }}>
+        <div className="absolute inset-x-0 bottom-0 px-4" style={{ paddingBottom: "calc(var(--bar-gap) + 12px)" }}>
           <button
             onClick={() => (preselect.length ? send(preselect) : setPicking(true))}
             disabled={sending}

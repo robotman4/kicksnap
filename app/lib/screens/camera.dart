@@ -461,8 +461,8 @@ class _CameraState extends State<Camera> with WidgetsBindingObserver, SingleTick
             bottom: 0,
             child: Container(
               // the bar under the viewfinder, same height as the editor's send bar
-              height: pad.bottom + bottomBar,
-              padding: EdgeInsets.fromLTRB(32, 0, 32, pad.bottom),
+              height: barGap(pad.bottom) + bottomBar,
+              padding: EdgeInsets.fromLTRB(32, 0, 32, barGap(pad.bottom)),
               child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                 Stack(clipBehavior: Clip.none, children: [
                   RoundButton(icon: Icons.chat_bubble_rounded, size: 64, onTap: widget.onChats),

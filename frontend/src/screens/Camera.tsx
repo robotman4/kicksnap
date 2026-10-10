@@ -414,7 +414,7 @@ export function Camera({
       {/* the bar under the viewfinder, same height as the editor's send bar */}
       <div
         className="absolute inset-x-0 bottom-0 flex items-center justify-between px-8"
-        style={{ height: `calc(${BOTTOM_BAR}px + env(safe-area-inset-bottom))`, paddingBottom: "env(safe-area-inset-bottom)" }}
+        style={{ height: `calc(${BOTTOM_BAR}px + var(--bar-gap))`, paddingBottom: "var(--bar-gap)" }}
       >
         <IconButton label="chats" onClick={onChats} big>
           <MessageCircle size={32} strokeWidth={2.5} />
