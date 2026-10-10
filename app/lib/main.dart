@@ -21,8 +21,17 @@ Future<void> main() async {
     systemNavigationBarColor: Colors.black,
   ));
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  hideStatusBar();
+  // Android brings the bar back after the keyboard, a system dialog or a trip to another app
+  SystemChrome.setSystemUIChangeCallback((visible) async {
+    if (visible) Future.delayed(const Duration(seconds: 3), hideStatusBar);
+  });
+  AppLifecycleListener(onResume: hideStatusBar);
   runApp(const KiksApp());
 }
+
+/// Full screen: no clock, signal, battery or notification icons. The navigation bar stays.
+void hideStatusBar() => SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: [SystemUiOverlay.bottom]);
 
 class KiksApp extends StatelessWidget {
   const KiksApp({super.key});

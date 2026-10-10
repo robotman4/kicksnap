@@ -2,7 +2,7 @@ import { Images, MessageCircle, RefreshCcw, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Friend, limits } from "../lib/api";
-import { BOTTOM_BAR, buzz, mediaArea, pref } from "../lib/feel";
+import { BOTTOM_BAR, buzz, mediaArea, pref, viewH } from "../lib/feel";
 import { cropRect } from "../lib/looks";
 
 export type Capture = { blob: Blob; kind: "photo" | "video"; url: string };
@@ -59,9 +59,9 @@ function coverRect(mw: number, mh: number, box: { x: number; y: number; w: numbe
 }
 
 function useWindowSize() {
-  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+  const [size, setSize] = useState({ w: window.innerWidth, h: viewH() });
   useEffect(() => {
-    const on = () => setSize({ w: window.innerWidth, h: window.innerHeight });
+    const on = () => setSize({ w: window.innerWidth, h: viewH() });
     window.addEventListener("resize", on);
     return () => window.removeEventListener("resize", on);
   }, []);

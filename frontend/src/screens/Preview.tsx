@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Media } from "../components/Media";
 import { Sheet } from "../components/Sheet";
-import { buzz, containRect, mediaArea, onColor, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
+import { buzz, containRect, mediaArea, viewH, onColor, pref, Rect, timerLabel, TIMERS } from "../lib/feel";
 import { applyLook, hasVignette, LookDefs, lookCss, LOOKS, luminance, SPECTRUM, spectrumAt, vignetteCss } from "../lib/looks";
 import { useVisualViewport } from "../lib/viewport";
 import { Capture } from "./Camera";
@@ -122,7 +122,7 @@ async function compose(capture: Capture, dims: { w: number; h: number }, r: Rect
   }
   // screen px -> image px, through the rect the media is shown in
   const sw = window.innerWidth;
-  const sh = window.innerHeight;
+  const sh = viewH();
   const k = W / r.w;
   ctx.setTransform(k, 0, 0, k, -r.x * k, -r.y * k);
   drawStrokes(ctx, strokes, sw, sh);
@@ -183,7 +183,7 @@ export function Preview({
     if (!c) return;
     const dpr = window.devicePixelRatio || 1;
     c.width = window.innerWidth * dpr;
-    c.height = window.innerHeight * dpr;
+    c.height = viewH() * dpr;
     const ctx = c.getContext("2d")!;
     ctx.clearRect(0, 0, c.width, c.height);
     drawStrokes(ctx, drawing.current ? [...strokes, drawing.current] : strokes, c.width, c.height);
@@ -193,7 +193,7 @@ export function Preview({
     if (mode === "text") textInput.current?.focus();
   }, [mode]);
 
-  const rel = (e: React.PointerEvent): Pt => [e.clientX / window.innerWidth, e.clientY / window.innerHeight];
+  const rel = (e: React.PointerEvent): Pt => [e.clientX / window.innerWidth, e.clientY / viewH()];
   const [, force] = useState(0);
 
   const drawDown = (e: React.PointerEvent) => {
@@ -220,7 +220,7 @@ export function Preview({
       return;
     }
     // start text in the lower part of the photo itself, not on the blurred fill
-    const y = (rect.y + rect.h * 0.75) / window.innerHeight;
+    const y = (rect.y + rect.h * 0.75) / viewH();
     setLabel((l) => l ?? { text: "", style: "bar", color: ink, x: 0.5, y, scale: 1, rotation: 0 });
     setMode("text");
   };
@@ -236,7 +236,7 @@ export function Preview({
     if (fingers.current.size === 2 && mode === "look" && label && free(label)) {
       const [a, b] = [...fingers.current.values()];
       const dx = (b[0] - a[0]) * window.innerWidth;
-      const dy = (b[1] - a[1]) * window.innerHeight;
+      const dy = (b[1] - a[1]) * viewH();
       pinch.current = { dist: Math.hypot(dx, dy), angle: Math.atan2(dy, dx), scale: label.scale, rotation: label.rotation };
       dragText.current = null;
     }
@@ -248,7 +248,7 @@ export function Preview({
     if (!p || fingers.current.size !== 2 || !p.dist) return;
     const [a, b] = [...fingers.current.values()];
     const dx = (b[0] - a[0]) * window.innerWidth;
-    const dy = (b[1] - a[1]) * window.innerHeight;
+    const dy = (b[1] - a[1]) * viewH();
     pinchedAt.current = Date.now();
     setLabel(
       (l) =>
@@ -305,7 +305,7 @@ export function Preview({
   // While typing, the text sits just above the keyboard (Snapchat-style) and drops
   // back to its spot when done. The photo itself never moves.
   const labelStyle = (l: Label): React.CSSProperties => {
-    const h = window.innerHeight;
+    const h = viewH();
     // keep a big pinch from overflowing the screen while typing
     const size = typing && free(l) ? Math.min(fontSize(l, h), FONT[l.style] * h * 1.2) : fontSize(l, h);
     const spot: React.CSSProperties = typing
@@ -325,7 +325,7 @@ export function Preview({
 
   return (
     <div
-      className="fixed inset-0 z-30 animate-[pop_.25s_ease-out] touch-none bg-black text-white"
+      className="fixed inset-x-0 top-0 h-[var(--app-h,100%)] z-30 animate-[pop_.25s_ease-out] touch-none bg-black text-white"
       data-nodrag
       onPointerDown={pinchDown}
       onPointerMove={pinchMove}

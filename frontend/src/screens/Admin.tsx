@@ -341,7 +341,7 @@ function Log() {
 export function AdminView({ tick, onClose, toast }: { tick: number; onClose: () => void; toast: (t: string) => void }) {
   const [tab, setTab] = useState<Tab>("reports");
   return createPortal(
-    <div className="fixed inset-0 z-50 flex flex-col bg-black text-white" data-nodrag>
+    <div className="fixed inset-x-0 top-0 h-[var(--app-h,100%)] z-50 flex flex-col bg-black text-white" data-nodrag>
       <header className="flex items-center gap-2 px-2 pt-[max(env(safe-area-inset-top),10px)]">
         <button onClick={onClose} aria-label="back" className="grid h-12 w-12 place-items-center rounded-full active:bg-white/10">
           <ChevronLeft size={30} strokeWidth={2.75} />

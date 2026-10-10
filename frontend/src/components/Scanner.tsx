@@ -70,7 +70,7 @@ export function Scanner({ hint, onClose, onCode }: { hint: string; onClose: () =
   // Portaled to <body>: inside the swipe pager, a transformed parent would pin
   // "fixed" to the pager track instead of the screen.
   return createPortal(
-    <div className="fixed inset-0 z-50 bg-black text-white" data-nodrag>
+    <div className="fixed inset-x-0 top-0 h-[var(--app-h,100%)] z-50 bg-black text-white" data-nodrag>
       {!typing && (
         <>
           <video ref={video} autoPlay playsInline muted className="h-full w-full object-cover" />

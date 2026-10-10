@@ -56,10 +56,34 @@ export const pref = {
 export const TIMERS = [3, 5, 10, 0] as const;
 export const timerLabel = (s: number) => (s === 0 ? "∞" : `${s}s`);
 
+/**
+ * Height of the app. A home-screen PWA on iOS can report a viewport shorter than the screen and leave
+ * a black strip at the bottom; it always takes the whole screen there, so the screen's height wins.
+ */
+const iosStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true;
+export function viewH() {
+  const h = window.innerHeight;
+  if (!iosStandalone) return h;
+  const portrait = window.innerWidth < h;
+  return Math.max(h, portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height));
+}
+
+/** Keep --app-h (the height of html, body and the full-screen layers) in step with viewH. */
+export function fitViewport() {
+  const set = () => {
+    const h = viewH();
+    document.documentElement.style.setProperty("--app-h", `${h}px`);
+    document.documentElement.style.overflow = h > window.innerHeight ? "hidden" : "";
+  };
+  set();
+  window.addEventListener("resize", set);
+  window.addEventListener("orientationchange", () => setTimeout(set, 300));
+}
+
 export type Rect = { x: number; y: number; w: number; h: number };
 
 /** Where object-fit: contain puts media of size nw×nh inside a W×H box. */
-export function containRect(nw: number, nh: number, W = window.innerWidth, H = window.innerHeight): Rect {
+export function containRect(nw: number, nh: number, W = window.innerWidth, H = viewH()): Rect {
   if (!nw || !nh) return { x: 0, y: 0, w: W, h: H };
   const s = Math.min(W / nw, H / nh);
   return { x: (W - nw * s) / 2, y: (H - nh * s) / 2, w: nw * s, h: nh * s };
@@ -83,7 +107,7 @@ export function barGap() {
  * Where the camera's viewfinder and the editor's media go: the whole screen above the bottom bar.
  * Camera photos are cropped to this shape, so the editor shows them in exactly the same spot.
  */
-export function mediaArea(W = window.innerWidth, H = window.innerHeight): Rect {
+export function mediaArea(W = window.innerWidth, H = viewH()): Rect {
   return { x: 0, y: 0, w: W, h: Math.max(1, H - barGap() - BOTTOM_BAR) };
 }
 

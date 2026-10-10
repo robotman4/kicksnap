@@ -5,7 +5,7 @@ import { ReportSheet } from "../components/Report";
 import { Media } from "../components/Media";
 import { api, Chat } from "../lib/api";
 import { openSnap, SnapProof } from "../lib/e2e";
-import { ago, buzz } from "../lib/feel";
+import { ago, buzz, containRect } from "../lib/feel";
 
 /** Full-screen snap player. Tap to skip, swipe down to close. Each snap burns once shown. */
 export function Viewer({ chat, onDone, toast }: { chat: Chat; onDone: (replyTo?: string) => void; toast: (t: string) => void }) {
@@ -19,6 +19,7 @@ export function Viewer({ chat, onDone, toast }: { chat: Chat; onDone: (replyTo?:
   const [reporting, setReporting] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<string | null>(null);
+  const [dims, setDims] = useState({ w: 0, h: 0 });
   const [dy, setDy] = useState(0);
   const y0 = useRef<number | null>(null);
   const snap = chat.snaps[i];
@@ -35,6 +36,7 @@ export function Viewer({ chat, onDone, toast }: { chat: Chat; onDone: (replyTo?:
     const urls: string[] = [];
     setUrl(null);
     setOverlay(null);
+    setDims({ w: 0, h: 0 });
     setCant(null);
     openSnap(snap, chat)
       .then((r) => {
@@ -69,10 +71,12 @@ export function Viewer({ chat, onDone, toast }: { chat: Chat; onDone: (replyTo?:
 
   if (!snap) return null;
   const timed = url && shown?.kind === "photo" && shown.seconds > 0;
+  // whole snap, rounded like the camera; hidden until its size is known so it doesn't jump
+  const rect = containRect(dims.w, dims.h);
 
   return (
     <div
-      className="fixed inset-0 z-30 touch-none bg-black text-white"
+      className="fixed inset-x-0 top-0 h-[var(--app-h,100%)] z-30 touch-none bg-black text-white"
       data-nodrag
       style={{ transform: `translateY(${dy}px) scale(${1 - dy / 2000})`, borderRadius: dy ? 24 : 0, transition: dy ? "none" : "transform .3s" }}
       onPointerDown={(e) => !reporting && (y0.current = e.clientY)}
@@ -100,9 +104,11 @@ export function Viewer({ chat, onDone, toast }: { chat: Chat; onDone: (replyTo?:
           </p>
         </div>
       )}
-      {url && shown && <Media src={url} kind={shown.kind} onEnded={next} />}
-
-      {url && overlay && <img src={overlay} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-contain" />}
+      {url && shown && (
+        <div className={dims.w ? "" : "opacity-0"}>
+          <Media src={url} kind={shown.kind} onEnded={next} onDims={setDims} frame={rect} overlay={overlay ? `url(${overlay}) center / 100% 100%` : undefined} />
+        </div>
+      )}
 
       <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/50 to-transparent px-3 pb-8 pt-[max(env(safe-area-inset-top),10px)]">
         <div className="flex gap-1">

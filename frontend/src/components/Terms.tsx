@@ -74,7 +74,7 @@ const SECTIONS: [string, string[]][] = [
 
 export function Terms({ onClose }: { onClose: () => void }) {
   return createPortal(
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black text-white" data-nodrag>
+    <div className="fixed inset-x-0 top-0 h-[var(--app-h,100%)] z-50 overflow-y-auto bg-black text-white" data-nodrag>
       <div className="mx-auto max-w-lg px-6 pb-[max(env(safe-area-inset-bottom),32px)] pt-[max(env(safe-area-inset-top),16px)]">
         <div className="sticky top-0 -mx-6 flex items-center justify-between bg-black/90 px-6 py-3 backdrop-blur">
           <h1 className="text-3xl font-black">the boring stuff</h1>

@@ -10,6 +10,7 @@ import '../api.dart';
 import '../e2e.dart' as e2e;
 import '../models.dart';
 import '../ui.dart';
+import 'camera.dart' show viewRadius;
 import 'report.dart';
 
 /// Full-screen snap player. Tap to skip, swipe down to close. Each snap burns once shown.
@@ -187,10 +188,20 @@ class _ViewerState extends State<Viewer> with SingleTickerProviderStateMixin {
                       ),
                     ]),
                   ),
-                if (s != null && s.kind == 'photo') Image.memory(s.media!, fit: BoxFit.contain, gaplessPlayback: true),
-                if (s != null && s.kind == 'video' && video != null)
-                  FittedBox(fit: BoxFit.contain, child: SizedBox(width: video!.value.size.width, height: video!.value.size.height, child: VideoPlayer(video!))),
-                if (s?.overlay != null) IgnorePointer(child: Image.memory(s!.overlay!, fit: BoxFit.contain)),
+                // the whole snap, rounded like the camera, with the drawing layer on top
+                if (s != null && (s.kind == 'photo' || video != null))
+                  Center(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(viewRadius),
+                      child: Stack(children: [
+                        if (s.kind == 'photo')
+                          Image.memory(s.media!, gaplessPlayback: true)
+                        else
+                          AspectRatio(aspectRatio: video!.value.aspectRatio, child: VideoPlayer(video!)),
+                        if (s.overlay != null) Positioned.fill(child: IgnorePointer(child: Image.memory(s.overlay!, fit: BoxFit.fill))),
+                      ]),
+                    ),
+                  ),
                 // top: progress bars, who, report
                 Positioned(
                   left: 0,

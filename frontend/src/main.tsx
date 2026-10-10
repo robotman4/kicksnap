@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { celebrateIfUpdated } from "./lib/update";
+import { fitViewport } from "./lib/feel";
+
+fitViewport();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

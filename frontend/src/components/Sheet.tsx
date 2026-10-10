@@ -5,7 +5,7 @@ export function Sheet({ open, onClose, children }: { open: boolean; onClose: () 
   const [dy, setDy] = useState(0);
   const y0 = useRef<number | null>(null);
   return (
-    <div className={`fixed inset-0 z-40 ${open ? "" : "pointer-events-none"}`} data-nodrag>
+    <div className={`fixed inset-x-0 top-0 h-[var(--app-h,100%)] z-40 ${open ? "" : "pointer-events-none"}`} data-nodrag>
       <div
         className={`absolute inset-0 bg-black/60 transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`}
         onClick={onClose}
